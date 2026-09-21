@@ -1,0 +1,38 @@
+name: Package & Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update version in .toc file
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          sed -i "s/^## Version:.*/## Version: $VERSION/" "Luckys_Loadouts/Luckys_Loadouts.toc"
+
+      - name: Package and upload
+        run: bash <(curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh)
+        env:
+          CF_API_KEY: ${{ secrets.CURSEFORGE_TOKEN }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_OAUTH }}
+
+      - name: Announce release
+        if: success()
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            --data "{\"content\":\"Lucky's Loadouts v$VERSION is out! https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION\"}" \
+            "$DISCORD_WEBHOOK"

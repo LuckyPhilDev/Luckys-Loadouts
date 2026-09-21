@@ -6,6 +6,7 @@
 ## SavedVariables: LuckyLoadoutsDB, LuckySettingsDB, LuckyRosterDB
 ## SavedVariablesPerCharacter: LuckyLoadoutsCharDB
 ## OptionalDeps: Luckys_Utils
+## X-Curse-Project-ID: 1705927
 
 Libs\LuckysUtils\embeds.xml
 Strings.lua

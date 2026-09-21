@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts PlayerSpellsFrame PlayerSpellsUtil EventUtil
+-- luacheck: globals LuckyLoadouts PlayerSpellsFrame PlayerSpellsUtil EventUtil C_Timer
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Settings = {}
@@ -513,6 +513,13 @@ function SettingsUI:Init(accountDB, characterDB)
         end
         if reminder:IsShown() and reminderMatch then
             reminderSwitch:SetEnabled(not LuckyLoadouts.Loadouts:GetSwitchBlocker(reminderMatch.configID))
+            if kind == "switchFailed" then
+                C_Timer.After(0, function()
+                    if reminder:IsShown() and reminderMatch then
+                        reminderSwitch:SetEnabled(not LuckyLoadouts.Loadouts:GetSwitchBlocker(reminderMatch.configID))
+                    end
+                end)
+            end
         end
         SettingsUI:RefreshManager()
         if assignDialog:IsShown() then SettingsUI:RefreshAssignments() end
