@@ -25,14 +25,30 @@ jobs:
           CF_API_KEY: ${{ secrets.CURSEFORGE_TOKEN }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_OAUTH }}
 
-      - name: Announce release
+      - name: Notify Discord on success
         if: success()
-        continue-on-error: true
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          curl --fail --silent --show-error \
-            -H "Content-Type: application/json" \
-            --data "{\"content\":\"Lucky's Loadouts v$VERSION is out! https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION\"}" \
-            "$DISCORD_WEBHOOK"
+          NOTES=$(awk '/^## /{c++; if(c==2) exit} c==1 && !/^## /' CHANGELOG.md | sed '/./,$!d')
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+          PAYLOAD=$(jq -n \
+            --arg title "Lucky's Loadouts v$VERSION released" \
+            --arg url "$URL" \
+            --arg desc "$NOTES" \
+            '{embeds:[{title:$title, url:$url, description:$desc, color:3066993}]}')
+          curl -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${{ secrets.DISCORD_WEBHOOK }}"
+
+      - name: Notify Discord on failure
+        if: failure()
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          PAYLOAD=$(jq -n \
+            --arg title "Lucky's Loadouts v$VERSION - release failed" \
+            --arg url "$RUN_URL" \
+            '{embeds:[{title:$title, url:$url, color:15158332}]}')
+          curl -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${{ secrets.DISCORD_WEBHOOK }}"
