@@ -19,6 +19,7 @@ local inCombat = false
 local staged = false
 local lastSelectedWrites = {}
 local canEdit = true
+local canCreate = true
 local activeConfigID = 900
 local loadResult = 2
 local mutationCount = 0
@@ -39,6 +40,7 @@ local configInfo = {
     [2] = { name = "Beta" },
     [3] = { name = "Gamma" },
 }
+local createdNames = {}
 
 Enum = { LoadConfigResult = { Error = 0, NoChangesNecessary = 1, LoadInProgress = 2, Ready = 3 } }
 C_Timer = { After = function(delay, fn) timers[#timers + 1] = { delay = delay, fn = fn } end }
@@ -47,6 +49,15 @@ C_ClassTalents = {
     GetLastSelectedSavedConfigID = function() return selectedID end,
     GetActiveConfigID = function() return activeConfigID end,
     CanEditTalents = function() return canEdit end,
+    CanCreateNewConfig = function() return canCreate end,
+    RequestNewConfig = function(name)
+        mutationCount = mutationCount + 1
+        createdNames[#createdNames + 1] = name
+        local configID = 4
+        configsBySpec[101][#configsBySpec[101] + 1] = configID
+        configInfo[configID] = { name = name }
+        return true
+    end,
     LoadConfig = function()
         mutationCount = mutationCount + 1
         return loadResult
@@ -147,6 +158,15 @@ LuckyLoadouts.GetSpecAssignments(characterDB, 202).categories.Dungeon = 3
 check(assignments.categories.Dungeon == 1, "character assignment tables are isolated")
 check(LuckyLoadouts.GetSpecAssignments(characterDB, 202).categories.Dungeon == 3,
     "specialization assignment tables are isolated")
+
+local created = LuckyLoadouts.Loadouts:Create("New Loadout")
+check(created and createdNames[1] == "New Loadout" and configInfo[4].name == "New Loadout",
+    "new loadout uses Blizzard's native creation API")
+canCreate = false
+local blockedCreate, createError = LuckyLoadouts.Loadouts:Create("Another Loadout")
+check(not blockedCreate and createError == LuckyLoadouts.Strings.CREATE_LIMIT,
+    "new loadout respects Blizzard's saved-loadout limit")
+canCreate = true
 
 local renamed = false
 LuckyLoadouts.Loadouts:AddListener(function(kind) if kind == "renamed" then renamed = true end end)

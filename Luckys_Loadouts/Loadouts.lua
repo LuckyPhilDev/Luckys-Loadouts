@@ -311,6 +311,20 @@ function Loadouts:Rename(configID, value)
     return true
 end
 
+function Loadouts:Create(name)
+    if not currentSpec() then return false, S.NO_SPEC end
+    if InCombatLockdown() then return false, S.IN_COMBAT end
+    if not C_ClassTalents.CanCreateNewConfig or not C_ClassTalents.RequestNewConfig then
+        return false, S.CREATE_FAILED
+    end
+    if not C_ClassTalents.CanCreateNewConfig() then return false, S.CREATE_LIMIT end
+
+    local ok, created = pcall(C_ClassTalents.RequestNewConfig, name)
+    if not ok or created ~= true then return false, S.CREATE_FAILED end
+    emit("created", S.CREATE_OK)
+    return true
+end
+
 function Loadouts:Delete(configID)
     local specID = currentSpec()
     if not specID then return false, S.NO_SPEC end

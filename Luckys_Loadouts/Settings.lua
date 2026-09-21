@@ -11,23 +11,21 @@ local charDB
 local manager
 local managerRows = {}
 local managerInner
-local specText
 local emptyText
 local managerStatus
 local managerApply
+local managerAssign
+local managerNew
 local renameDialog
 local renameEdit
 local renameStatus
 local renameTarget
 local assignDialog
-local assignTitle
 local assignStatus
 local assignCategoryRows = {}
 local assignInstanceRows = {}
 local assignInstanceInner
 local assignCurrentButton
-local assignTarget
-local assignTargetName
 local reminder
 local reminderText
 local reminderStatus
@@ -90,7 +88,7 @@ local MANAGER_WIDTH = 230
 local MANAGER_ROW_HEIGHT = 32
 local MANAGER_BAR_HEIGHT = HEADER_HEIGHT
 local MANAGER_HINT_HEIGHT = 22
-local MANAGER_FOOTER_HEIGHT = 28
+local MANAGER_FOOTER_HEIGHT = 40
 local MANAGER_STANDALONE_MAX_HEIGHT = 430
 local MANAGER_EMPTY_HEIGHT = 40
 local MANAGER_TALENTS_TOP_OFFSET = 20
@@ -103,12 +101,15 @@ local function createManager()
         "manager", S.MANAGER_TITLE)
     manager.bar = managerBar
 
-    specText = makeText(managerBar, 11, C.textMuted)
-    specText:SetPoint("LEFT", manager.titleText, "RIGHT", 10, -1)
-    specText:SetPoint("RIGHT", managerBar, "RIGHT", -36, -1)
-    specText:SetJustifyH("LEFT")
-    specText:SetWordWrap(false)
-    specText:SetText(S.MANAGER_SUBTITLE)
+    managerAssign = makeIconButton(managerBar, "target", S.ASSIGN, 16)
+    managerAssign:SetPoint("RIGHT", managerBar, "RIGHT", -34, 0)
+    managerAssign:SetScript("OnClick", function() showAssignments() end)
+    managerNew = makeIconButton(managerBar, "plus", S.NEW, 16)
+    managerNew:SetPoint("RIGHT", managerAssign, "LEFT", -4, 0)
+    managerNew:SetScript("OnClick", function()
+        local ok, err = LuckyLoadouts.Loadouts:Create(S.NEW_LOADOUT_NAME)
+        if not ok then setStatus(managerStatus, err, true) end
+    end)
 
     local header = CreateFrame("Frame", nil, manager)
     header:SetHeight(MANAGER_HINT_HEIGHT)
@@ -161,6 +162,8 @@ local function attachToTalents()
     manager.bar:SetScript("OnDragStart", nil)
     manager.bar:SetScript("OnDragStop", nil)
     manager.closeButton:Hide()
+    managerAssign:ClearAllPoints()
+    managerAssign:SetPoint("RIGHT", manager.bar, "RIGHT", -8, 0)
     manager:ClearAllPoints()
     manager:SetPoint("TOPRIGHT", PlayerSpellsFrame, "TOPLEFT", 2, -MANAGER_TALENTS_TOP_OFFSET)
     manager:SetFrameStrata(PlayerSpellsFrame:GetFrameStrata())
@@ -203,7 +206,6 @@ local function showRowMenu(owner, entry)
     MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
         rootDescription:CreateTitle(entry.name)
         rootDescription:CreateButton(S.RENAME, function() showRename(entry) end)
-        rootDescription:CreateButton(S.ASSIGN, function() showAssignments(entry) end)
         rootDescription:CreateDivider()
         rootDescription:CreateButton(S.DELETE, function() confirmDelete(entry) end)
     end)
@@ -231,10 +233,8 @@ local function acquireManagerRow(index)
     row.marker:SetPoint("LEFT", 0, 0)
     row.marker:SetColorTexture(C.goldPrimary[1], C.goldPrimary[2], C.goldPrimary[3], 1)
     row.marker:Hide()
-    row.assign = makeIconButton(row, "target", S.ASSIGN, 14)
-    row.assign:SetPoint("RIGHT", -8, 0)
     row.rename = makeIconButton(row, "pencil", S.RENAME, 14)
-    row.rename:SetPoint("RIGHT", row.assign, "LEFT", -6, 0)
+    row.rename:SetPoint("RIGHT", -8, 0)
     row.name = makeText(row, 12, C.textLight)
     row.name:SetPoint("TOPLEFT", 10, -4)
     row.name:SetPoint("RIGHT", row.rename, "LEFT", -6, 0)
@@ -289,9 +289,17 @@ function showRename(entry)
     renameEdit:SetFocus()
 end
 
+local function showLoadoutPicker(owner, list, onSelect)
+    MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+        for _, entry in ipairs(list) do
+            rootDescription:CreateButton(entry.name, function() onSelect(entry) end)
+        end
+    end)
+end
+
 local function createAssignmentDialog()
     local titleBar
-    assignDialog, titleBar, assignTitle = makeSurface("LuckyLoadoutsAssignDialog", 590, 563, "manager", S.ASSIGN_TITLE)
+    assignDialog, titleBar = makeSurface("LuckyLoadoutsAssignDialog", 590, 563, "manager", S.ASSIGN_TITLE)
     assignDialog:SetMovable(false)
     titleBar:SetScript("OnDragStart", nil)
     titleBar:SetScript("OnDragStop", nil)
@@ -305,7 +313,7 @@ local function createAssignmentDialog()
     categoryHeader:SetPoint("TOPLEFT", 16, -69)
     categoryHeader:SetText(S.CATEGORY_DEFAULTS)
 
-    local order = { "Dungeon", "Raid", "Battleground", "Arena", "OpenWorld", "Delve" }
+    local order = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
     for index, category in ipairs(order) do
         local categoryKey = category
         local row = CreateFrame("Frame", nil, assignDialog)
@@ -315,19 +323,19 @@ local function createAssignmentDialog()
         row.label = makeText(row, 12, C.textLight)
         row.label:SetPoint("LEFT", 4, 0)
         row.label:SetText(S.CATEGORIES[category])
-        row.value = makeText(row, 11, C.textMuted)
-        row.value:SetPoint("RIGHT", -174, 0)
-        row.value:SetWidth(220)
-        row.value:SetJustifyH("RIGHT")
-        row.assign = makeButton(row, S.ASSIGN, 76)
-        row.assign:SetPoint("RIGHT", -88, 0)
+        row.picker = makeButton(row, S.NONE, 220)
+        row.picker:SetPoint("RIGHT", -88, 0)
         row.clear = makeButton(row, S.CLEAR, 76)
         row.clear:SetPoint("RIGHT", -4, 0)
-        row.assign:SetScript("OnClick", function()
+        row.picker:SetScript("OnClick", function()
             local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
-            LuckyLoadouts.Reminders:SetCategory(specID, categoryKey, assignTarget)
-            setStatus(assignStatus, string.format(S.ASSIGNED, assignTargetName, S.CATEGORIES[categoryKey]), false)
-            SettingsUI:RefreshAssignments()
+            local list = LuckyLoadouts.Loadouts:Read(specID)
+            if not list then return end
+            showLoadoutPicker(row.picker, list, function(entry)
+                LuckyLoadouts.Reminders:SetCategory(specID, categoryKey, entry.id)
+                setStatus(assignStatus, string.format(S.ASSIGNED, entry.name, S.CATEGORIES[categoryKey]), false)
+                SettingsUI:RefreshAssignments()
+            end)
         end)
         row.clear:SetScript("OnClick", function()
             local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
@@ -342,9 +350,13 @@ local function createAssignmentDialog()
     assignCurrentButton:SetPoint("TOPLEFT", 16, -281)
     assignCurrentButton:SetScript("OnClick", function()
         local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
-        local ok, err = LuckyLoadouts.Reminders:SetCurrentInstance(specID, assignTarget)
-        setStatus(assignStatus, ok and string.format(S.ASSIGNED, assignTargetName, S.INSTANCE_OVERRIDES) or err, not ok)
-        SettingsUI:RefreshAssignments()
+        local list = LuckyLoadouts.Loadouts:Read(specID)
+        if not list then return end
+        showLoadoutPicker(assignCurrentButton, list, function(entry)
+            local ok, err = LuckyLoadouts.Reminders:SetCurrentInstance(specID, entry.id)
+            setStatus(assignStatus, ok and string.format(S.ASSIGNED, entry.name, S.INSTANCE_OVERRIDES) or err, not ok)
+            SettingsUI:RefreshAssignments()
+        end)
     end)
 
     local instanceHeader = makeText(assignDialog, 10, C.goldPrimary)
@@ -371,21 +383,16 @@ local function acquireInstanceRow(index)
     row:SetPoint("TOPRIGHT")
     row.label = makeText(row, 12, C.textLight)
     row.label:SetPoint("LEFT", 4, 7)
-    row.value = makeText(row, 10, C.textMuted)
-    row.value:SetPoint("TOPLEFT", row.label, "BOTTOMLEFT", 0, -1)
-    row.assign = makeButton(row, S.ASSIGN, 76)
-    row.assign:SetPoint("RIGHT", -86, 0)
+    row.picker = makeButton(row, S.NONE, 220)
+    row.picker:SetPoint("RIGHT", -86, 0)
     row.remove = makeButton(row, S.REMOVE, 76)
     row.remove:SetPoint("RIGHT", -4, 0)
     assignInstanceRows[index] = row
     return row
 end
 
-function showAssignments(entry)
-    assignTarget = entry.id
-    assignTargetName = entry.name
-    assignTitle:SetText(S.ASSIGN_TITLE)
-    setStatus(assignStatus, string.format(S.ASSIGNING, entry.name), false)
+function showAssignments()
+    setStatus(assignStatus, "", false)
     assignDialog:Show()
     SettingsUI:RefreshAssignments()
 end
@@ -523,7 +530,7 @@ local function fitManager(contentHeight)
     managerInner:SetSize(MANAGER_WIDTH - 2 - gutter, math.max(contentHeight, 1))
 end
 
-local SITUATION_ORDER = { "Raid", "Dungeon", "Delve", "Arena", "Battleground", "OpenWorld" }
+local SITUATION_ORDER = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
 
 -- Each loadout's assigned categories, then its instance overrides by name.
 local function situationsByConfig(specID)
@@ -550,8 +557,6 @@ end
 
 function SettingsUI:RefreshManager()
     if not manager then return end
-    local _, specName = LuckyLoadouts.Loadouts:GetCurrentSpec()
-    specText:SetText(specName or S.NO_SPEC)
     local list, err, _, selectedID = LuckyLoadouts.Loadouts:Read()
     if not list then
         emptyText:SetText(err)
@@ -585,7 +590,6 @@ function SettingsUI:RefreshManager()
             end
         end)
         row.rename:SetScript("OnClick", function() showRename(rowEntry) end)
-        row.assign:SetScript("OnClick", function() showAssignments(rowEntry) end)
     end
     for index = #list + 1, #managerRows do managerRows[index]:Hide() end
     fitManager(#list == 0 and MANAGER_EMPTY_HEIGHT or #list * MANAGER_ROW_HEIGHT)
@@ -602,7 +606,7 @@ function SettingsUI:RefreshAssignments()
     assignCurrentButton:SetShown(snapshot ~= nil
         and (snapshot.category == "Dungeon" or snapshot.category == "Raid"))
     for category, row in pairs(assignCategoryRows) do
-        row.value:SetText(assignedName(data.categories[category], byID))
+        row.picker:SetText(assignedName(data.categories[category], byID))
     end
     local entries = {}
     for instanceID, entry in pairs(data.instances) do
@@ -616,10 +620,13 @@ function SettingsUI:RefreshAssignments()
         local row = acquireInstanceRow(index)
         row:Show()
         row.label:SetText(item.entry.label or tostring(item.instanceID))
-        row.value:SetText(assignedName(item.entry.configID, byID))
-        row.assign:SetScript("OnClick", function()
-            LuckyLoadouts.Reminders:SetInstance(specID, instanceID, assignTarget)
-            SettingsUI:RefreshAssignments()
+        row.picker:SetText(assignedName(item.entry.configID, byID))
+        row.picker:SetScript("OnClick", function()
+            showLoadoutPicker(row.picker, list, function(entry)
+                LuckyLoadouts.Reminders:SetInstance(specID, instanceID, entry.id)
+                setStatus(assignStatus, string.format(S.ASSIGNED, entry.name, item.entry.label or tostring(instanceID)), false)
+                SettingsUI:RefreshAssignments()
+            end)
         end)
         row.remove:SetScript("OnClick", function()
             LuckyLoadouts.Reminders:RemoveInstance(specID, instanceID)
