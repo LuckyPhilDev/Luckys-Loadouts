@@ -228,7 +228,7 @@ function Loadouts:RequestSwitch(configID, source)
         finishSwitch("switchFailed", S.SWITCH_RESULT_UNKNOWN)
         return false, S.SWITCH_RESULT_UNKNOWN
     end
-    handOffToTalentFrame(configID, pending.state)
+    if pending then handOffToTalentFrame(configID, pending.state) end
 
     startSwitchTimeout(nextToken)
     self:ObserveNativeState()

@@ -204,6 +204,19 @@ loadResult = Enum.LoadConfigResult.NoChangesNecessary
 switchOK = LuckyLoadouts.Loadouts:RequestSwitch(1, "test")
 check(switchOK and LuckyLoadouts.Loadouts:GetPending() == nil, "no-change succeeds only after selected identity is observed")
 
+local reentered = false
+LuckyLoadouts.Loadouts:AddListener(function(kind)
+    if kind == "switchPending" and not reentered then
+        reentered = true
+        LuckyLoadouts.Loadouts:ObserveNativeState()
+    end
+end)
+selectedID = 1
+loadResult = Enum.LoadConfigResult.NoChangesNecessary
+local reenteredSwitchOK = LuckyLoadouts.Loadouts:RequestSwitch(1, "test")
+check(reenteredSwitchOK and LuckyLoadouts.Loadouts:GetPending() == nil,
+    "a synchronous switch listener may finish the pending switch")
+
 selectedID = 1
 loadResult = Enum.LoadConfigResult.LoadInProgress
 switchOK = LuckyLoadouts.Loadouts:RequestSwitch(2, "test")
