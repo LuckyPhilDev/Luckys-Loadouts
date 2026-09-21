@@ -29,9 +29,6 @@ local renameTarget
 local assignDialog
 local assignStatus
 local assignCategoryRows = {}
-local assignInstanceRows = {}
-local assignInstanceInner
-local assignCurrentButton
 local reminder
 local reminderText
 local reminderStatus
@@ -354,7 +351,7 @@ end
 
 local function createAssignmentDialog()
     local titleBar
-    assignDialog, titleBar = makeSurface("LuckyLoadoutsAssignDialog", 590, 563, "manager", S.ASSIGN_TITLE)
+    assignDialog, titleBar = makeSurface("LuckyLoadoutsAssignDialog", 440, 300, "manager", S.ASSIGN_TITLE)
     assignDialog:SetMovable(false)
     titleBar:SetScript("OnDragStart", nil)
     titleBar:SetScript("OnDragStop", nil)
@@ -379,19 +376,23 @@ local function createAssignmentDialog()
         row.label:SetPoint("LEFT", 4, 0)
         row.label:SetText(S.CATEGORIES[category])
         row.picker = makeButton(row, S.NONE, 220)
-        row.picker:SetPoint("RIGHT", -88, 0)
-        row.clear = makeButton(row, S.CLEAR, 76)
+        row.edit = makeIconButton(row, "square-pen", S.EDIT, 16)
+        row.edit:SetPoint("RIGHT", -24, 0)
+        row.picker:SetPoint("RIGHT", row.edit, "LEFT", -6, 0)
+        row.clear = makeIconButton(row, "eraser", S.CLEAR, 16)
         row.clear:SetPoint("RIGHT", -4, 0)
-        row.picker:SetScript("OnClick", function()
+        local function pickLoadout(owner)
             local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
             local list = LuckyLoadouts.Loadouts:Read(specID)
             if not list then return end
-            showLoadoutPicker(row.picker, list, function(entry)
+            showLoadoutPicker(owner, list, function(entry)
                 LuckyLoadouts.Reminders:SetCategory(specID, categoryKey, entry.id)
                 setStatus(assignStatus, string.format(S.ASSIGNED, entry.name, S.CATEGORIES[categoryKey]), false)
                 SettingsUI:RefreshAssignments()
             end)
-        end)
+        end
+        row.picker:SetScript("OnClick", pickLoadout)
+        row.edit:SetScript("OnClick", pickLoadout)
         row.clear:SetScript("OnClick", function()
             local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
             LuckyLoadouts.Reminders:SetCategory(specID, categoryKey, nil)
@@ -401,49 +402,8 @@ local function createAssignmentDialog()
         assignCategoryRows[categoryKey] = row
     end
 
-    assignCurrentButton = makeButton(assignDialog, S.USE_CURRENT_INSTANCE, 180)
-    assignCurrentButton:SetPoint("TOPLEFT", 16, -281)
-    assignCurrentButton:SetScript("OnClick", function()
-        local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
-        local list = LuckyLoadouts.Loadouts:Read(specID)
-        if not list then return end
-        showLoadoutPicker(assignCurrentButton, list, function(entry)
-            local ok, err = LuckyLoadouts.Reminders:SetCurrentInstance(specID, entry.id)
-            setStatus(assignStatus, ok and string.format(S.ASSIGNED, entry.name, S.INSTANCE_OVERRIDES) or err, not ok)
-            SettingsUI:RefreshAssignments()
-        end)
-    end)
-
-    local instanceHeader = makeText(assignDialog, 10, C.goldPrimary)
-    instanceHeader:SetPoint("TOPLEFT", 16, -319)
-    instanceHeader:SetText(S.INSTANCE_OVERRIDES)
-
-    local scroll = CreateFrame("ScrollFrame", nil, assignDialog, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 12, -335)
-    scroll:SetPoint("BOTTOMRIGHT", -34, DIALOG_PAD)
-    assignInstanceInner = CreateFrame("Frame", nil, scroll)
-    assignInstanceInner:SetSize(530, 1)
-    scroll:SetScrollChild(assignInstanceInner)
-
     assignDialog:ClearAllPoints()
     assignDialog:SetPoint("TOPLEFT", manager, "TOPRIGHT", 6, 0)
-end
-
-local function acquireInstanceRow(index)
-    local row = assignInstanceRows[index]
-    if row then return row end
-    row = CreateFrame("Frame", nil, assignInstanceInner)
-    row:SetHeight(38)
-    row:SetPoint("TOPLEFT", 0, -(index - 1) * 38)
-    row:SetPoint("TOPRIGHT")
-    row.label = makeText(row, 12, C.textLight)
-    row.label:SetPoint("LEFT", 4, 7)
-    row.picker = makeButton(row, S.NONE, 220)
-    row.picker:SetPoint("RIGHT", -86, 0)
-    row.remove = makeButton(row, S.REMOVE, 76)
-    row.remove:SetPoint("RIGHT", -4, 0)
-    assignInstanceRows[index] = row
-    return row
 end
 
 function showAssignments()
@@ -471,6 +431,7 @@ end
 
 local function createReminder()
     reminder = makeSurface("LuckyLoadoutsReminder", REMINDER_WIDTH, 140, "reminder", S.REMINDER_TITLE)
+    reminder:SetFrameStrata("TOOLTIP")
     reminderText = makeText(reminder, 13, C.textLight)
     reminderText:SetPoint("TOPLEFT", DIALOG_PAD, -REMINDER_TEXT_TOP)
     reminderText:SetPoint("RIGHT", -DIALOG_PAD, 0)
@@ -674,39 +635,9 @@ function SettingsUI:RefreshAssignments()
     local list, _, byID = LuckyLoadouts.Loadouts:Read(specID)
     if not list then return end
     local data = LuckyLoadouts.GetSpecAssignments(charDB, specID)
-    local snapshot = LuckyLoadouts.Reminders:GetLatestSnapshot()
-    assignCurrentButton:SetShown(snapshot ~= nil
-        and (snapshot.category == "Dungeon" or snapshot.category == "Raid"))
     for category, row in pairs(assignCategoryRows) do
         row.picker:SetText(assignedName(data.categories[category], byID))
     end
-    local entries = {}
-    for instanceID, entry in pairs(data.instances) do
-        entries[#entries + 1] = { instanceID = instanceID, entry = entry }
-    end
-    table.sort(entries, function(a, b)
-        return tostring(a.entry.label or a.instanceID) < tostring(b.entry.label or b.instanceID)
-    end)
-    for index, item in ipairs(entries) do
-        local instanceID = item.instanceID
-        local row = acquireInstanceRow(index)
-        row:Show()
-        row.label:SetText(item.entry.label or tostring(item.instanceID))
-        row.picker:SetText(assignedName(item.entry.configID, byID))
-        row.picker:SetScript("OnClick", function()
-            showLoadoutPicker(row.picker, list, function(entry)
-                LuckyLoadouts.Reminders:SetInstance(specID, instanceID, entry.id)
-                setStatus(assignStatus, string.format(S.ASSIGNED, entry.name, item.entry.label or tostring(instanceID)), false)
-                SettingsUI:RefreshAssignments()
-            end)
-        end)
-        row.remove:SetScript("OnClick", function()
-            LuckyLoadouts.Reminders:RemoveInstance(specID, instanceID)
-            SettingsUI:RefreshAssignments()
-        end)
-    end
-    for index = #entries + 1, #assignInstanceRows do assignInstanceRows[index]:Hide() end
-    assignInstanceInner:SetHeight(math.max(#entries * 38, 1))
 end
 
 function SettingsUI:ShowReminder(match, snapshot)
