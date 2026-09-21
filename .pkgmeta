@@ -1,0 +1,15 @@
+package-as: Luckys_Loadouts
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+externals:
+  Luckys_Loadouts/Libs/LuckysUtils:
+    url: https://github.com/LuckyPhilDev/LuckyUtils
+    tag: latest
+
+ignore:
+  - tests
+
+enable-nolib-creation: no
