@@ -1,5 +1,8 @@
 package-as: Luckys_Loadouts
 
+move-folders:
+  Luckys_Loadouts: Luckys_Loadouts
+
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown
