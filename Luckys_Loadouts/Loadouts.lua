@@ -314,6 +314,8 @@ end
 function Loadouts:Create(name)
     if not currentSpec() then return false, S.NO_SPEC end
     if InCombatLockdown() then return false, S.IN_COMBAT end
+    name = trim(type(name) == "string" and name or "")
+    if name == "" then return false, S.RENAME_BLANK end
     if not C_ClassTalents.CanCreateNewConfig or not C_ClassTalents.RequestNewConfig then
         return false, S.CREATE_FAILED
     end

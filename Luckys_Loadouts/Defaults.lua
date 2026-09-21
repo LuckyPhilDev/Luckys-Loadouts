@@ -5,6 +5,7 @@ LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Defaults = {
     account = {
         devMode = false,
+        autoNameNewLoadouts = false,
         minimap = { hide = false, minimapPos = 245 },
         manager = { point = "CENTER", x = 0, y = 0 },
         reminder = { point = "TOP", x = 0, y = -180 },

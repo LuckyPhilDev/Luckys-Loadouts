@@ -30,6 +30,7 @@ local readyForCommit = true
 local readyCalls, readyArgCount = 0, nil
 local commitConfigIDs = {}
 local rollbackConfigIDs = {}
+local deletedConfigIDs = {}
 local currentSnapshot
 local inInstanceState = true
 local instanceTypeState = "party"
@@ -68,6 +69,11 @@ C_ClassTalents = {
     RenameConfig = function(id, name)
         mutationCount = mutationCount + 1
         configInfo[id].name = name
+        return true
+    end,
+    DeleteConfig = function(id)
+        mutationCount = mutationCount + 1
+        deletedConfigIDs[#deletedConfigIDs + 1] = id
         return true
     end,
 }
@@ -162,6 +168,9 @@ check(LuckyLoadouts.GetSpecAssignments(characterDB, 202).categories.Dungeon == 3
 local created = LuckyLoadouts.Loadouts:Create("New Loadout")
 check(created and createdNames[1] == "New Loadout" and configInfo[4].name == "New Loadout",
     "new loadout uses Blizzard's native creation API")
+local blankCreate, blankCreateError = LuckyLoadouts.Loadouts:Create("   ")
+check(not blankCreate and blankCreateError == LuckyLoadouts.Strings.RENAME_BLANK,
+    "new loadout rejects blank names")
 canCreate = false
 local blockedCreate, createError = LuckyLoadouts.Loadouts:Create("Another Loadout")
 check(not blockedCreate and createError == LuckyLoadouts.Strings.CREATE_LIMIT,
@@ -439,5 +448,17 @@ for _, frame in ipairs(frames) do
 end
 runTimers()
 check(mutationCount == eventMutations, "event handlers never initiate talent mutation")
+
+local deleteEvent, deleteMessage
+LuckyLoadouts.Loadouts:AddListener(function(kind, message)
+    if kind == "deleted" or kind == "deleteFailed" then
+        deleteEvent, deleteMessage = kind, message
+    end
+end)
+local quickDeleteOK = LuckyLoadouts.Loadouts:Delete(1)
+check(quickDeleteOK and #deletedConfigIDs == 1 and deletedConfigIDs[1] == 1,
+    "quick delete sends one native deletion request")
+check(deleteEvent == "deleted" and deleteMessage == LuckyLoadouts.Strings.DELETE_OK,
+    "quick delete reports success")
 
 print(string.format("LoadoutsTest: %d/%d assertions passed", passed, tests))

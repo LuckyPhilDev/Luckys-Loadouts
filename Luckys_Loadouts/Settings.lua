@@ -16,7 +16,13 @@ local managerStatus
 local managerApply
 local managerAssign
 local managerNew
+local managerQuickDelete
+local managerHint
+local quickDeleteMode = false
 local renameDialog
+local renameTitle
+local renamePrompt
+local renameSave
 local renameEdit
 local renameStatus
 local renameTarget
@@ -35,6 +41,7 @@ local reminderMatch
 local settingsPanel
 local minimapButton
 local showRename
+local showCreate
 local showAssignments
 
 local function setTextColor(fontString, color)
@@ -64,8 +71,13 @@ local function placeButtonPair(parent, primary, secondary)
     primary:SetPoint("RIGHT", secondary, "LEFT", -BUTTON_GAP, 0)
 end
 
-local function makeIconButton(parent, iconName, tooltip, size)
-    return LuckyUI.CreateIconButton(parent, { icon = iconName, size = size or 20, tooltip = tooltip })
+local function makeIconButton(parent, iconName, tooltip, size, color)
+    return LuckyUI.CreateIconButton(parent, {
+        icon = iconName,
+        size = size or 20,
+        tooltip = tooltip,
+        color = color,
+    })
 end
 
 local function makeSurface(name, width, height, positionKey, title)
@@ -95,21 +107,38 @@ local MANAGER_TALENTS_TOP_OFFSET = 20
 local SCROLLBAR_GUTTER = 22
 local managerScroll
 
+local function setQuickDeleteMode(enabled)
+    quickDeleteMode = enabled
+    managerHint:SetText(enabled and S.QUICK_DELETE_HINT or S.SWITCH_HINT)
+    managerAssign:SetEnabled(not enabled)
+    managerNew:SetEnabled(not enabled)
+    local pending = LuckyLoadouts.Loadouts:GetPending()
+    managerApply:SetShown(not enabled and pending and pending.state == "applyRequired")
+    SettingsUI:RefreshManager()
+end
+
 local function createManager()
     local managerBar
     manager, managerBar = makeSurface("LuckyLoadoutsManager", MANAGER_WIDTH, MANAGER_STANDALONE_MAX_HEIGHT,
         "manager", S.MANAGER_TITLE)
     manager.bar = managerBar
 
-    managerAssign = makeIconButton(managerBar, "target", S.ASSIGN, 16)
+    managerAssign = makeIconButton(managerBar, "target", S.ASSIGN_TOOLTIP, 16)
     managerAssign:SetPoint("RIGHT", managerBar, "RIGHT", -34, 0)
     managerAssign:SetScript("OnClick", function() showAssignments() end)
-    managerNew = makeIconButton(managerBar, "plus", S.NEW, 16)
+    managerNew = makeIconButton(managerBar, "plus", S.NEW_TOOLTIP, 16)
     managerNew:SetPoint("RIGHT", managerAssign, "LEFT", -4, 0)
     managerNew:SetScript("OnClick", function()
+        if not db.autoNameNewLoadouts then
+            showCreate()
+            return
+        end
         local ok, err = LuckyLoadouts.Loadouts:Create(S.NEW_LOADOUT_NAME)
         if not ok then setStatus(managerStatus, err, true) end
     end)
+    managerQuickDelete = makeIconButton(managerBar, "trash", S.QUICK_DELETE, 16, C.danger)
+    managerQuickDelete:SetPoint("RIGHT", managerNew, "LEFT", -4, 0)
+    managerQuickDelete:SetScript("OnClick", function() setQuickDeleteMode(not quickDeleteMode) end)
 
     local header = CreateFrame("Frame", nil, manager)
     header:SetHeight(MANAGER_HINT_HEIGHT)
@@ -117,11 +146,11 @@ local function createManager()
     header:SetPoint("TOPRIGHT", -1, -MANAGER_BAR_HEIGHT)
     LuckySettings.Rich.FillBg(header, C.bgInput)
 
-    local hint = makeText(header, 10, C.textMuted)
-    hint:SetPoint("LEFT", 10, 0)
-    hint:SetPoint("RIGHT", -10, 0)
-    hint:SetJustifyH("LEFT")
-    hint:SetText(S.SWITCH_HINT)
+    managerHint = makeText(header, 10, C.textMuted)
+    managerHint:SetPoint("LEFT", 10, 0)
+    managerHint:SetPoint("RIGHT", -10, 0)
+    managerHint:SetJustifyH("LEFT")
+    managerHint:SetText(S.SWITCH_HINT)
 
     managerScroll = CreateFrame("ScrollFrame", nil, manager, "UIPanelScrollFrameTemplate")
     managerScroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
@@ -149,6 +178,9 @@ local function createManager()
     end)
 
     manager:SetScript("OnShow", function() SettingsUI:RefreshManager() end)
+    manager:SetScript("OnHide", function()
+        if quickDeleteMode then setQuickDeleteMode(false) end
+    end)
 end
 
 -- Bolt the manager onto the right edge of the Talents tab, so it opens and
@@ -235,6 +267,9 @@ local function acquireManagerRow(index)
     row.marker:Hide()
     row.rename = makeIconButton(row, "pencil", S.RENAME, 14)
     row.rename:SetPoint("RIGHT", -8, 0)
+    row.delete = makeIconButton(row, "trash", S.DELETE, 14, C.danger)
+    row.delete:SetPoint("RIGHT", -8, 0)
+    row.delete:Hide()
     row.name = makeText(row, 12, C.textLight)
     row.name:SetPoint("TOPLEFT", 10, -4)
     row.name:SetPoint("RIGHT", row.rename, "LEFT", -6, 0)
@@ -251,38 +286,58 @@ end
 
 local function createRenameDialog()
     local titleBar
-    renameDialog, titleBar = makeSurface("LuckyLoadoutsRenameDialog", 360, 163, "manager", S.RENAME_TITLE)
+    renameDialog, titleBar, renameTitle = makeSurface("LuckyLoadoutsRenameDialog", 360, 163, "manager", S.RENAME_TITLE)
     renameDialog:SetMovable(false)
     titleBar:SetScript("OnDragStart", nil)
     titleBar:SetScript("OnDragStop", nil)
 
-    local prompt = makeText(renameDialog, 12, C.textLight)
-    prompt:SetPoint("TOPLEFT", DIALOG_PAD, -CONTENT_TOP)
-    prompt:SetText(S.RENAME_PROMPT)
+    renamePrompt = makeText(renameDialog, 12, C.textLight)
+    renamePrompt:SetPoint("TOPLEFT", DIALOG_PAD, -CONTENT_TOP)
+    renamePrompt:SetText(S.RENAME_PROMPT)
 
     renameEdit = LuckyUI.CreateInput(renameDialog, { width = 360 - DIALOG_PAD * 2, height = BUTTON_HEIGHT })
-    renameEdit:SetPoint("TOPLEFT", prompt, "BOTTOMLEFT", 0, -6)
+    renameEdit:SetPoint("TOPLEFT", renamePrompt, "BOTTOMLEFT", 0, -6)
 
     renameStatus = makeText(renameDialog, 10, C.danger)
     renameStatus:SetPoint("TOPLEFT", renameEdit, "BOTTOMLEFT", 0, -5)
     renameStatus:SetPoint("RIGHT", -DIALOG_PAD, 0)
     renameStatus:SetJustifyH("LEFT")
 
-    local save = makeButton(renameDialog, S.SAVE, 90, "primary")
+    renameSave = makeButton(renameDialog, S.SAVE, 90, "primary")
     local cancel = makeButton(renameDialog, S.CANCEL, 90)
-    placeButtonPair(renameDialog, save, cancel)
+    placeButtonPair(renameDialog, renameSave, cancel)
     cancel:SetScript("OnClick", function() renameDialog:Hide() end)
-    save:SetScript("OnClick", function()
-        local ok, err = LuckyLoadouts.Loadouts:Rename(renameTarget, renameEdit:GetText())
+    renameSave:SetScript("OnClick", function()
+        local ok, err
+        if renameTarget then
+            ok, err = LuckyLoadouts.Loadouts:Rename(renameTarget, renameEdit:GetText())
+        else
+            ok, err = LuckyLoadouts.Loadouts:Create(renameEdit:GetText())
+        end
         if not ok then setStatus(renameStatus, err, true) else setStatus(renameStatus, S.LOADING, false) end
     end)
-    renameEdit:SetScript("OnEnterPressed", function() save:Click() end)
+    renameEdit:SetScript("OnEnterPressed", function() renameSave:Click() end)
     renameEdit:SetScript("OnEscapePressed", function() renameDialog:Hide() end)
 end
 
 function showRename(entry)
     renameTarget = entry.id
+    renameTitle:SetText(S.RENAME_TITLE)
+    renamePrompt:SetText(S.RENAME_PROMPT)
+    renameSave:SetText(S.SAVE)
     renameEdit:SetText(entry.name)
+    renameEdit:HighlightText()
+    setStatus(renameStatus, "", false)
+    renameDialog:Show()
+    renameEdit:SetFocus()
+end
+
+function showCreate()
+    renameTarget = nil
+    renameTitle:SetText(S.CREATE_TITLE)
+    renamePrompt:SetText(S.CREATE_PROMPT)
+    renameSave:SetText(S.CREATE)
+    renameEdit:SetText(S.NEW_LOADOUT_NAME)
     renameEdit:HighlightText()
     setStatus(renameStatus, "", false)
     renameDialog:Show()
@@ -469,11 +524,17 @@ function SettingsUI:Init(accountDB, characterDB)
         panel:Group(S.SETTINGS_GENERAL, function(group)
             group:Button({ label = S.OPEN_MANAGER, desc = S.OPEN_MANAGER_DESC,
                 onClick = function() SettingsUI:OpenManager() end })
+            group:Toggle({
+                label = S.AUTO_NAME_NEW_LOADOUTS,
+                desc = S.AUTO_NAME_NEW_LOADOUTS_DESC,
+                checked = function() return db.autoNameNewLoadouts end,
+                onToggle = function(value) db.autoNameNewLoadouts = value end,
+            })
         end)
     end)
 
     LuckyLoadouts.Loadouts:AddListener(function(kind, message)
-        if kind == "renamed" then renameDialog:Hide() end
+        if kind == "renamed" or kind == "created" then renameDialog:Hide() end
         if message then
             setStatus(managerStatus, message, kind == "switchFailed" or kind == "renameFailed" or kind == "deleteFailed")
             if reminder:IsShown() then
@@ -481,7 +542,7 @@ function SettingsUI:Init(accountDB, characterDB)
             end
         end
         if kind == "applyRequired" then
-            managerApply:Show()
+            managerApply:SetShown(not quickDeleteMode)
             reminderSwitch:Hide()
             reminderApply:Show()
         elseif kind == "switched" or kind == "switchFailed" then
@@ -576,13 +637,18 @@ function SettingsUI:RefreshManager()
         local row = acquireManagerRow(index)
         row:Show()
         row.name:SetText(rowEntry.name)
-        row.highlight:SetShown(rowEntry.selected)
-        row.marker:SetShown(rowEntry.selected)
+        row.highlight:SetShown(not quickDeleteMode and rowEntry.selected)
+        row.marker:SetShown(not quickDeleteMode and rowEntry.selected)
+        row.rename:SetShown(not quickDeleteMode)
+        row.delete:SetShown(quickDeleteMode)
+        row.delete:SetEnabled(true)
         setTextColor(row.name, rowEntry.selected and C.goldPrimary or C.textLight)
-        local blocker = rowEntry.selected and S.SWITCH_NO_CHANGE or LuckyLoadouts.Loadouts:GetSwitchBlocker(rowEntry.id)
+        local blocker = not quickDeleteMode
+            and (rowEntry.selected and S.SWITCH_NO_CHANGE or LuckyLoadouts.Loadouts:GetSwitchBlocker(rowEntry.id))
         local labels = situations[rowEntry.id]
         row.state:SetText(labels and table.concat(labels, ", ") or S.NO_SITUATION)
         row:SetScript("OnClick", function(_, button)
+            if quickDeleteMode then return end
             if button == "RightButton" then
                 showRowMenu(row, rowEntry)
             elseif not blocker then
@@ -590,6 +656,12 @@ function SettingsUI:RefreshManager()
             end
         end)
         row.rename:SetScript("OnClick", function() showRename(rowEntry) end)
+        row.delete:SetScript("OnClick", function()
+            row.delete:SetEnabled(false)
+            local ok, deleteErr = LuckyLoadouts.Loadouts:Delete(rowEntry.id)
+            row.delete:SetEnabled(not ok)
+            if not ok then setStatus(managerStatus, deleteErr, true) end
+        end)
     end
     for index = #list + 1, #managerRows do managerRows[index]:Hide() end
     fitManager(#list == 0 and MANAGER_EMPTY_HEIGHT or #list * MANAGER_ROW_HEIGHT)
