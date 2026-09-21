@@ -1,3 +1,4 @@
 .vscode/
 builds/
-Luckys_Loadouts/Libs/
+.release/
+src/Libs/

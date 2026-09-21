@@ -118,10 +118,10 @@ local function runTimers()
     for _, timer in ipairs(pending) do timer.fn() end
 end
 
-dofile(root .. "Luckys_Loadouts/Strings.lua")
-dofile(root .. "Luckys_Loadouts/Defaults.lua")
-dofile(root .. "Luckys_Loadouts/Loadouts.lua")
-dofile(root .. "Luckys_Loadouts/Reminders.lua")
+dofile(root .. "src/Strings.lua")
+dofile(root .. "src/Defaults.lua")
+dofile(root .. "src/Loadouts.lua")
+dofile(root .. "src/Reminders.lua")
 
 LuckyLoadouts.Settings = {
     ShowReminder = function() end,

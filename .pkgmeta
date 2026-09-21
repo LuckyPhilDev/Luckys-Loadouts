@@ -1,14 +1,14 @@
 package-as: Luckys_Loadouts
 
 move-folders:
-  Luckys_Loadouts: Luckys_Loadouts
+  Luckys_Loadouts/src: Luckys_Loadouts
 
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown
 
 externals:
-  Luckys_Loadouts/Libs/LuckysUtils:
+  src/Libs/LuckysUtils:
     url: https://github.com/LuckyPhilDev/LuckyUtils
     tag: latest
 
