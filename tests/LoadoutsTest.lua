@@ -308,9 +308,12 @@ check(frameCommitID == 2, "a loading switch marks the talent frame's commit star
 check(#lastSelectedWrites == writesBefore, "the last-selected pointer waits for the cast to land")
 check(LuckyLoadouts.Loadouts:GetPending() ~= nil and LuckyLoadouts.Loadouts:GetSwitchBlocker(2) ~= nil,
     "a pending switch blocks a repeat switch")
-LuckyLoadouts.Loadouts:HandleEvent("CONFIG_COMMIT_FAILED")
+local handedRollbacks = rollbackCount
+LuckyLoadouts.Loadouts:HandleEvent("CONFIG_COMMIT_FAILED", activeConfigID)
 check(LuckyLoadouts.Loadouts:GetPending() == nil and #lastSelectedWrites == writesBefore,
     "an interrupted commit clears the pending switch and leaves the pointer alone")
+runTimers()
+check(rollbackCount == handedRollbacks, "a failed load the shown talent frame already undid is not rolled back again")
 check(LuckyLoadouts.Loadouts:GetSwitchBlocker(2) ~= nil,
     "a switch in progress in Blizzard's own dropdown blocks switching")
 frameCommitID = nil
@@ -327,6 +330,19 @@ LuckyLoadouts.Loadouts:ObserveNativeState()
 check(LuckyLoadouts.Loadouts:GetPending() == nil, "the switch completes once the pointer moves")
 PlayerSpellsFrame, TalentFrameBaseMixin = nil, nil
 selectedID = 1
+
+-- Switching from the reminder with the Talents window hidden.
+loadResult = Enum.LoadConfigResult.LoadInProgress
+LuckyLoadouts.Loadouts:RequestSwitch(2, "reminder")
+staged = true
+local unhandedRollbacks = rollbackCount
+LuckyLoadouts.Loadouts:HandleEvent("CONFIG_COMMIT_FAILED", activeConfigID)
+runTimers()
+check(rollbackCount == unhandedRollbacks + 1 and rollbackConfigIDs[#rollbackConfigIDs] == activeConfigID,
+    "an interrupted load left staged is rolled back")
+staged = false
+check(LuckyLoadouts.Loadouts:GetPending() == nil and LuckyLoadouts.Loadouts:GetSwitchBlocker(2) == nil,
+    "after the rollback the switch can be tried again")
 
 local shown, hidden = {}, 0
 local controllerSpec = 101

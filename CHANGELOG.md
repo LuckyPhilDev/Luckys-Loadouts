@@ -11,6 +11,10 @@
 
 - **Assign window** Clicking the Assign button again closes it, and it now closes along with the Talents window.
 
+### Fixed
+
+- Interrupting a switch from the loadout reminder no longer leaves the loadout half-applied, so you can press Switch again.
+
 ## [1.0.0]
 
 ### Added

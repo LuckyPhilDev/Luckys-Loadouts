@@ -385,7 +385,20 @@ end
 function Loadouts:HandleEvent(event, configID)
     -- An interrupted loadout cast leaves nothing else to observe, so take
     -- Blizzard's failure at its word instead of waiting out the timeout.
-    if event == "CONFIG_COMMIT_FAILED" then self:CancelPending(S.SWITCH_FAILED) end
+    if event == "CONFIG_COMMIT_FAILED" and pending then
+        -- An interrupted load leaves the loadout staged, and staged changes block
+        -- every retry. Blizzard's talent frame undoes them only while it is shown,
+        -- so whatever it leaves a frame later is rolled back here. A switch never
+        -- starts over staged edits, so nothing of the player's is lost.
+        C_Timer.After(0, function()
+            local activeID = C_ClassTalents.GetActiveConfigID()
+            if activeID and hasStagedChanges() then
+                pcall(C_Traits.RollbackConfig, activeID)
+                emit("refreshed")
+            end
+        end)
+        self:CancelPending(S.SWITCH_FAILED)
+    end
     -- The active config updating is how Blizzard's own frame knows a commit landed.
     if event == "TRAIT_CONFIG_UPDATED" and pending
             and (pending.state == "loading" or pending.state == "applying")
