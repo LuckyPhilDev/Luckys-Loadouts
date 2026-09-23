@@ -4,10 +4,10 @@ Pick existing Blizzard talent loadouts and get reminders when your content chang
 
 ## Features
 
-- **Loadout manager** View, switch, and rename saved loadouts for your current specialization.
+- **Loadout manager** A panel on the side of the Talents window to switch, create, rename, and delete saved loadouts for your current specialization. Drag loadouts to put them in the order you want.
 - **Content assignments** Set defaults for dungeons, raids, battlegrounds, arenas, open world, and delves.
-- **Instance overrides** Assign a different loadout to a dungeon or raid you are visiting.
-- **Content reminders** Get one dismissible reminder per visit when another loadout is assigned.
+- **Dungeon and raid boss loadouts** Give each of this season's dungeons, and each raid boss, its own loadout, picked from Adventure Guide tiles.
+- **Content reminders** Get one dismissible reminder per visit when another loadout is assigned. In a raid, the reminder follows your kills and suggests the loadout for the bosses you can pull next.
 
 ## Installation
 
@@ -16,8 +16,8 @@ Install through CurseForge, or copy `Luckys_Loadouts` into your World of Warcraf
 ## Usage
 
 1. Create saved loadouts in Blizzard's Talents window.
-2. Open Lucky's Loadouts from the minimap or settings.
-3. Use Assign to choose a loadout for each content type and instance override.
+2. Open the Talents window, or click the minimap button, to see the loadout manager beside it.
+3. Click the Assign button to choose a loadout for each content type, season dungeon, and raid boss.
 4. Use Switch on a reminder when you want to change loadout.
 
 ## Slash Commands
@@ -28,7 +28,7 @@ Install through CurseForge, or copy `Luckys_Loadouts` into your World of Warcraf
 
 ## Settings
 
-Open Options, then AddOns, then Lucky's Loadouts. You can open the manager and hide the minimap button there.
+Open Options, then AddOns, then Lucky's Loadouts. You can open the manager, create new loadouts without being asked for a name, and hide the minimap button there.
 
 ## A note on AI
 
