@@ -1,5 +1,6 @@
 -- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin Enum C_Timer C_ClassTalents C_Traits C_Map C_PartyInfo
 -- luacheck: globals GetSpecialization GetSpecializationInfo InCombatLockdown IsInInstance GetInstanceInfo CreateFrame
+-- luacheck: globals C_RaidLocks EJ_GetInstanceForMap EJ_SelectInstance EJ_GetEncounterInfoByIndex EJ_GetCreatureInfo
 
 local script = arg[0]:gsub("\\", "/")
 local root = script:match("^(.*)/tests/[^/]+$") .. "/"
@@ -119,7 +120,9 @@ local function runTimers()
 end
 
 dofile(root .. "src/Strings.lua")
+dofile(root .. "src/Constants.lua")
 dofile(root .. "src/Defaults.lua")
+dofile(root .. "src/Journal.lua")
 dofile(root .. "src/Loadouts.lua")
 dofile(root .. "src/Reminders.lua")
 
@@ -480,5 +483,83 @@ check(quickDeleteOK and #deletedConfigIDs == 1 and deletedConfigIDs[1] == 1,
     "quick delete sends one native deletion request")
 check(deleteEvent == "deleted" and deleteMessage == LuckyLoadouts.Strings.DELETE_OK,
     "quick delete reports success")
+
+-- The Voidspire: Averzian opens Vorasius and Salhadaar, both open Vaelgor & Ezzorak.
+local VOIDSPIRE_BOSSES = {
+    { encounterID = 2733, dungeonEncounterID = 3001, name = "Imperator Averzian" },
+    { encounterID = 2734, dungeonEncounterID = 3002, name = "Vorasius" },
+    { encounterID = 2736, dungeonEncounterID = 3003, name = "Fallen-King Salhadaar" },
+    { encounterID = 2735, dungeonEncounterID = 3004, name = "Vaelgor & Ezzorak" },
+}
+local voidspireLayout = LuckyLoadouts.Constants.RAID_LAYOUTS[1307]
+local function nextNames(killedNames)
+    local names = {}
+    local available = LuckyLoadouts.Journal.AvailableBosses(VOIDSPIRE_BOSSES, voidspireLayout,
+        function(boss) return killedNames[boss.name] == true end)
+    for index, boss in ipairs(available) do names[index] = boss.name end
+    return table.concat(names, ", ")
+end
+check(nextNames({}) == "Imperator Averzian", "only the entrance boss is next in a fresh raid")
+check(nextNames({ ["Imperator Averzian"] = true }) == "Vorasius, Fallen-King Salhadaar",
+    "the entrance boss opens both wings, in journal order")
+check(nextNames({ ["Imperator Averzian"] = true, Vorasius = true }) == "Fallen-King Salhadaar",
+    "a boss needing two kills waits for both")
+check(#LuckyLoadouts.Journal.AvailableBosses(VOIDSPIRE_BOSSES, nil, function() return false end) == 4,
+    "a raid with no layout treats every living boss as next")
+
+-- Standing in the raid, with Averzian dead on the lockout.
+local killedEncounters = { [3001] = true }
+C_RaidLocks = { IsEncounterComplete = function(_, dungeonEncounterID) return killedEncounters[dungeonEncounterID] end }
+function EJ_GetInstanceForMap() return 1307 end
+function EJ_SelectInstance() end
+function EJ_GetCreatureInfo() end
+function EJ_GetEncounterInfoByIndex(index)
+    local boss = VOIDSPIRE_BOSSES[index]
+    if not boss then return nil end
+    return boss.name, nil, boss.encounterID, nil, nil, nil, boss.dungeonEncounterID
+end
+local realGetInstanceInfo = GetInstanceInfo
+function GetInstanceInfo() return "The Voidspire", "raid", 16, "Mythic", 20, false, false, 2900 end
+local raidSnapshot = LuckyLoadouts.Reminders.ClassifyContent()
+check(raidSnapshot.category == "Raid" and #raidSnapshot.bosses == 2
+        and raidSnapshot.key == "Raid:2900:2734:2736",
+    "a raid snapshot carries the next bosses, and a new set of them makes a new visit")
+GetInstanceInfo = realGetInstanceInfo
+
+local raidData = LuckyLoadouts.GetSpecAssignments(characterDB, 101)
+raidData.categories.Raid = 1
+local voidspire = { id = 2900, journalID = 1307, category = "Raid", label = "The Voidspire" }
+local loadoutsByID = { [1] = { id = 1, name = "Alpha" }, [2] = { id = 2, name = "Beta" } }
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[2], 2)
+local bossMatch = LuckyLoadouts.Reminders.ResolveAssignment(raidData, raidSnapshot, loadoutsByID)
+check(bossMatch.configID == 2 and bossMatch.label == "Vorasius" and not bossMatch.choices,
+    "one assigned next boss gives a single suggestion")
+
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[3], 1)
+local choiceMatch = LuckyLoadouts.Reminders.ResolveAssignment(raidData, raidSnapshot, loadoutsByID)
+check(choiceMatch.choices and #choiceMatch.choices == 2
+        and LuckyLoadouts.Reminders.Offers(choiceMatch, 1) and LuckyLoadouts.Reminders.Offers(choiceMatch, 2),
+    "next bosses wanting different loadouts offer each as a choice")
+
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[3], 2)
+local sharedMatch = LuckyLoadouts.Reminders.ResolveAssignment(raidData, raidSnapshot, loadoutsByID)
+check(not sharedMatch.choices and sharedMatch.label == "Vorasius, Fallen-King Salhadaar",
+    "next bosses sharing a loadout are one suggestion")
+
+local freshSnapshot = { category = "Raid", instanceID = 2900, label = "The Voidspire", key = "Raid:2900",
+    bosses = { VOIDSPIRE_BOSSES[1] } }
+local fallback = LuckyLoadouts.Reminders.ResolveAssignment(raidData, freshSnapshot, loadoutsByID)
+check(fallback.source == "category:Raid" and fallback.configID == 1,
+    "an unassigned next boss leaves the raid to its category default")
+
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, nil, 2)
+local instanceMatch = LuckyLoadouts.Reminders.ResolveAssignment(raidData, freshSnapshot, loadoutsByID)
+check(instanceMatch.source == "instance:2900" and instanceMatch.configID == 2,
+    "an instance assignment beats the category when no next boss is assigned")
+
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, nil, nil)
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[2], nil)
+LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[3], nil)
+check(raidData.instances[2900] == nil, "clearing every assignment drops the instance entry")
 
 print(string.format("LoadoutsTest: %d/%d assertions passed", passed, tests))

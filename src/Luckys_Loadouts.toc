@@ -10,7 +10,9 @@
 
 Libs\LuckysUtils\embeds.xml
 Strings.lua
+Constants.lua
 Defaults.lua
+Journal.lua
 Loadouts.lua
 Reminders.lua
 Settings.lua

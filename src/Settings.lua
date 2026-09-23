@@ -37,6 +37,8 @@ local reminderStatus
 local reminderSwitch
 local reminderApply
 local reminderMatch
+local reminderChoices
+local reminderChoiceRows = {}
 local settingsPanel
 local minimapButton
 local showRename
@@ -398,9 +400,128 @@ local function showLoadoutPicker(owner, list, onSelect)
     end)
 end
 
+local ASSIGN_WIDTH = 440
+local ASSIGN_ROW_HEIGHT = 32
+local ASSIGN_ROWS_TOP = 81
+local CATEGORY_ORDER = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
+local SEASON_HEADER_TOP = ASSIGN_ROWS_TOP + #CATEGORY_ORDER * ASSIGN_ROW_HEIGHT + 12
+local TILES_TOP = SEASON_HEADER_TOP + 16
+local TILES_PER_ROW = 4
+local TILE_GAP = 8
+local TILE_WIDTH = (ASSIGN_WIDTH - DIALOG_PAD * 2 - TILE_GAP * (TILES_PER_ROW - 1)) / TILES_PER_ROW
+local TILE_HEIGHT = 53
+-- The Adventure Guide draws only this corner of its instance art.
+local EJ_ART_COORDS = { 0, 0.68359375, 0, 0.7421875 }
+-- The same art trimmed to the 2:1 of a boss portrait.
+local EJ_ART_ROW_COORDS = { 0, 0.68359375, 0.03, 0.71 }
+local FULL_COORDS = { 0, 1, 0, 1 }
+local INSTANCE_WIDTH = 420
+local INSTANCE_ROW_HEIGHT = 40
+local seasonTiles = {}
+local instanceDialog
+local instanceTitle
+local instanceRows = {}
+local assignInstance
+local assignBosses = {}
+
+local function reportAssignment(loadout, name)
+    local message = loadout and string.format(S.ASSIGNED, loadout.name, name) or string.format(S.CLEARED, name)
+    setStatus(assignStatus, message, false)
+    SettingsUI:RefreshAssignments()
+end
+
+-- The owner sets row.assign(specID, loadout), with a nil loadout to clear.
+local function createAssignRow(parent, top, height, pickerWidth)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(height)
+    row:SetPoint("TOPLEFT", 12, -top)
+    row:SetPoint("TOPRIGHT", -12, -top)
+    row.clear = makeIconButton(row, "eraser", S.CLEAR, 16)
+    row.clear:SetPoint("RIGHT", -4, 0)
+    row.edit = makeIconButton(row, "square-pen", S.EDIT, 16)
+    row.edit:SetPoint("RIGHT", -24, 0)
+    row.picker = makeButton(row, S.NONE, pickerWidth)
+    row.picker:SetPoint("RIGHT", row.edit, "LEFT", -6, 0)
+    row.label = makeText(row, 12, C.textLight)
+    row.label:SetPoint("LEFT", 4, 0)
+    row.label:SetPoint("RIGHT", row.picker, "LEFT", -6, 0)
+    row.label:SetJustifyH("LEFT")
+    row.label:SetWordWrap(false)
+    local function pickLoadout(owner)
+        local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
+        local list = LuckyLoadouts.Loadouts:Read(specID)
+        if not list then return end
+        showLoadoutPicker(owner, list, function(loadout) row.assign(specID, loadout) end)
+    end
+    row.picker:SetScript("OnClick", pickLoadout)
+    row.edit:SetScript("OnClick", pickLoadout)
+    row.clear:SetScript("OnClick", function() row.assign(LuckyLoadouts.Loadouts:GetCurrentSpec(), nil) end)
+    return row
+end
+
+-- Clicking the open instance again closes its panel.
+local function chooseInstance(instance)
+    local reopened = assignInstance and assignInstance.journalID == instance.journalID
+    assignInstance = not reopened and instance or nil
+    assignBosses = assignInstance and assignInstance.category == "Raid"
+        and LuckyLoadouts.Journal.Bosses(assignInstance.journalID) or {}
+    SettingsUI:RefreshAssignments()
+end
+
+local function showTileTooltip(tile)
+    GameTooltip:SetOwner(tile, "ANCHOR_TOP")
+    GameTooltip:SetText(tile.instance.label)
+    GameTooltip:Show()
+end
+
+local function seasonTile(index)
+    local tile = seasonTiles[index]
+    if tile then return tile end
+    tile = CreateFrame("Button", nil, assignDialog, "BackdropTemplate")
+    tile:SetSize(TILE_WIDTH, TILE_HEIGHT)
+    local column, line = (index - 1) % TILES_PER_ROW, math.floor((index - 1) / TILES_PER_ROW)
+    tile:SetPoint("TOPLEFT", DIALOG_PAD + column * (TILE_WIDTH + TILE_GAP), -(TILES_TOP + line * (TILE_HEIGHT + TILE_GAP)))
+    tile:SetBackdrop(LuckyUI.Backdrop)
+    tile:SetBackdropColor(0, 0, 0, 0)
+    tile.art = tile:CreateTexture(nil, "ARTWORK")
+    tile.art:SetPoint("TOPLEFT", 1, -1)
+    tile.art:SetPoint("BOTTOMRIGHT", -1, 1)
+    tile.art:SetTexCoord(unpack(EJ_ART_COORDS))
+    local shade = tile:CreateTexture(nil, "ARTWORK", nil, 1)
+    shade:SetPoint("BOTTOMLEFT", 1, 1)
+    shade:SetPoint("BOTTOMRIGHT", -1, 1)
+    shade:SetHeight(16)
+    shade:SetColorTexture(0, 0, 0, 0.75)
+    tile.name = makeText(tile, 10, C.textLight)
+    tile.name:SetPoint("BOTTOMLEFT", 5, 4)
+    tile.name:SetPoint("BOTTOMRIGHT", -5, 4)
+    tile.name:SetJustifyH("LEFT")
+    tile.name:SetWordWrap(false)
+    local hover = tile:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints(tile.art)
+    hover:SetColorTexture(1, 1, 1, 0.1)
+    tile:SetScript("OnClick", function() chooseInstance(tile.instance) end)
+    tile:SetScript("OnEnter", showTileTooltip)
+    tile:SetScript("OnLeave", GameTooltip_Hide)
+    seasonTiles[index] = tile
+    return tile
+end
+
+local function instanceRow(index)
+    local row = instanceRows[index]
+    if row then return row end
+    row = createAssignRow(instanceDialog, CONTENT_TOP + (index - 1) * INSTANCE_ROW_HEIGHT, INSTANCE_ROW_HEIGHT, 170)
+    row.art = row:CreateTexture(nil, "ARTWORK")
+    row.art:SetSize(64, 32)
+    row.art:SetPoint("LEFT", 4, 0)
+    row.label:SetPoint("LEFT", row.art, "RIGHT", 8, 0)
+    instanceRows[index] = row
+    return row
+end
+
 local function createAssignmentDialog()
     local titleBar
-    assignDialog, titleBar = makeSurface("LuckyLoadoutsAssignDialog", 440, 300, "manager", S.ASSIGN_TITLE)
+    assignDialog, titleBar = makeSurface("LuckyLoadoutsAssignDialog", ASSIGN_WIDTH, 300, "manager", S.ASSIGN_TITLE)
     assignDialog:SetMovable(false)
     titleBar:SetScript("OnDragStart", nil)
     titleBar:SetScript("OnDragStop", nil)
@@ -414,63 +535,160 @@ local function createAssignmentDialog()
     categoryHeader:SetPoint("TOPLEFT", 16, -69)
     categoryHeader:SetText(S.CATEGORY_DEFAULTS)
 
-    local order = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
-    for index, category in ipairs(order) do
-        local categoryKey = category
-        local row = CreateFrame("Frame", nil, assignDialog)
-        row:SetHeight(32)
-        row:SetPoint("TOPLEFT", 12, -81 - (index - 1) * 32)
-        row:SetPoint("TOPRIGHT", -12, -81 - (index - 1) * 32)
-        row.label = makeText(row, 12, C.textLight)
-        row.label:SetPoint("LEFT", 4, 0)
+    for index, category in ipairs(CATEGORY_ORDER) do
+        local row = createAssignRow(assignDialog, ASSIGN_ROWS_TOP + (index - 1) * ASSIGN_ROW_HEIGHT,
+            ASSIGN_ROW_HEIGHT, 220)
         row.label:SetText(S.CATEGORIES[category])
-        row.picker = makeButton(row, S.NONE, 220)
-        row.edit = makeIconButton(row, "square-pen", S.EDIT, 16)
-        row.edit:SetPoint("RIGHT", -24, 0)
-        row.picker:SetPoint("RIGHT", row.edit, "LEFT", -6, 0)
-        row.clear = makeIconButton(row, "eraser", S.CLEAR, 16)
-        row.clear:SetPoint("RIGHT", -4, 0)
-        local function pickLoadout(owner)
-            local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
-            local list = LuckyLoadouts.Loadouts:Read(specID)
-            if not list then return end
-            showLoadoutPicker(owner, list, function(entry)
-                LuckyLoadouts.Reminders:SetCategory(specID, categoryKey, entry.id)
-                setStatus(assignStatus, string.format(S.ASSIGNED, entry.name, S.CATEGORIES[categoryKey]), false)
-                SettingsUI:RefreshAssignments()
-            end)
+        row.assign = function(specID, loadout)
+            LuckyLoadouts.Reminders:SetCategory(specID, category, loadout and loadout.id)
+            reportAssignment(loadout, S.CATEGORIES[category])
         end
-        row.picker:SetScript("OnClick", pickLoadout)
-        row.edit:SetScript("OnClick", pickLoadout)
-        row.clear:SetScript("OnClick", function()
-            local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
-            LuckyLoadouts.Reminders:SetCategory(specID, categoryKey, nil)
-            setStatus(assignStatus, string.format(S.CLEARED, S.CATEGORIES[categoryKey]), false)
-            SettingsUI:RefreshAssignments()
-        end)
-        assignCategoryRows[categoryKey] = row
+        assignCategoryRows[category] = row
     end
+
+    local seasonHeader = makeText(assignDialog, 10, C.goldPrimary)
+    seasonHeader:SetPoint("TOPLEFT", 16, -SEASON_HEADER_TOP)
+    seasonHeader:SetText(S.CURRENT_SEASON)
 
     assignDialog:ClearAllPoints()
     assignDialog:SetPoint("TOPLEFT", manager, "TOPRIGHT", 6, 0)
+
+    local instanceBar
+    instanceDialog, instanceBar, instanceTitle = makeSurface("LuckyLoadoutsInstanceDialog", INSTANCE_WIDTH, 200,
+        "manager", "")
+    instanceDialog:SetMovable(false)
+    instanceBar:SetScript("OnDragStart", nil)
+    instanceBar:SetScript("OnDragStop", nil)
+    instanceDialog:ClearAllPoints()
+    instanceDialog:SetPoint("TOPLEFT", assignDialog, "TOPRIGHT", 6, 0)
+    -- Closing the panel, Escape included, deselects its tile.
+    instanceDialog:SetScript("OnHide", function()
+        assignInstance = nil
+        SettingsUI:RefreshAssignments()
+    end)
+    assignDialog:HookScript("OnHide", function() instanceDialog:Hide() end)
 end
 
+-- Opening inside a season dungeon or raid starts with it open.
 function showAssignments()
     setStatus(assignStatus, "", false)
+    local journalID = IsInInstance() and LuckyLoadouts.Journal.CurrentJournalID()
+    for _, instance in ipairs(journalID and LuckyLoadouts.Journal.Season() or {}) do
+        local open = assignInstance and assignInstance.journalID == journalID
+        if instance.journalID == journalID and not open then chooseInstance(instance) end
+    end
     assignDialog:Show()
     SettingsUI:RefreshAssignments()
+end
+
+local function refreshInstanceRows(data, byID)
+    if not assignInstance then
+        instanceDialog:Hide()
+        return
+    end
+    local targets = { { label = S.WHOLE_INSTANCE, name = assignInstance.label, art = assignInstance.art,
+        coords = EJ_ART_ROW_COORDS } }
+    for _, boss in ipairs(assignBosses) do
+        targets[#targets + 1] = { label = boss.name, name = boss.name, boss = boss, art = boss.portrait,
+            coords = FULL_COORDS }
+    end
+    local entry = data.instances[assignInstance.id]
+    entry = type(entry) == "table" and entry or {}
+    for index, target in ipairs(targets) do
+        local row = instanceRow(index)
+        local configID = entry.configID
+        if target.boss then
+            local assigned = type(entry.bosses) == "table" and entry.bosses[target.boss.encounterID]
+            configID = type(assigned) == "table" and assigned.configID or nil
+        end
+        row.art:SetTexture(target.art)
+        row.art:SetTexCoord(unpack(target.coords))
+        row.label:SetText(target.label)
+        row.picker:SetText(assignedName(configID, byID))
+        row.assign = function(specID, loadout)
+            LuckyLoadouts.Reminders:SetInstanceAssignment(specID, assignInstance, target.boss, loadout and loadout.id)
+            reportAssignment(loadout, target.name)
+        end
+        row:Show()
+    end
+    for index = #targets + 1, #instanceRows do instanceRows[index]:Hide() end
+    instanceTitle:SetText(assignInstance.label)
+    instanceDialog:SetHeight(CONTENT_TOP + #targets * INSTANCE_ROW_HEIGHT + DIALOG_PAD)
+    instanceDialog:Show()
+end
+
+-- Gold names mark instances with something assigned, a gold border the open one.
+local function refreshSeason(data, byID)
+    local season = LuckyLoadouts.Journal.Season()
+    for index, instance in ipairs(season) do
+        local tile = seasonTile(index)
+        tile.instance = instance
+        tile.art:SetTexture(instance.art)
+        tile.name:SetText(instance.label)
+        setTextColor(tile.name, data.instances[instance.id] and C.goldPrimary or C.textLight)
+        local open = assignInstance and assignInstance.journalID == instance.journalID
+        local border = open and C.goldPrimary or C.borderDark
+        tile:SetBackdropBorderColor(border[1], border[2], border[3])
+        tile:Show()
+    end
+    for index = #season + 1, #seasonTiles do seasonTiles[index]:Hide() end
+    local lines = math.ceil(#season / TILES_PER_ROW)
+    assignDialog:SetHeight(TILES_TOP + lines * (TILE_HEIGHT + TILE_GAP) - TILE_GAP + DIALOG_PAD)
+    refreshInstanceRows(data, byID)
 end
 
 local REMINDER_WIDTH = 380
 local REMINDER_TEXT_TOP = CONTENT_TOP
 local REMINDER_LINE_GAP = 6
+local REMINDER_CHOICE_HEIGHT = 28
 
 -- Grow to the wrapped text, so a short reminder has no gap above the buttons.
 local function fitReminder()
     local status = reminderStatus:GetText()
     local statusHeight = (status and status ~= "") and (REMINDER_LINE_GAP + reminderStatus:GetStringHeight()) or 0
-    reminder:SetHeight(REMINDER_TEXT_TOP + reminderText:GetStringHeight() + statusHeight
+    local choicesHeight = reminderChoices:IsShown() and (REMINDER_LINE_GAP + reminderChoices:GetHeight()) or 0
+    reminder:SetHeight(REMINDER_TEXT_TOP + reminderText:GetStringHeight() + choicesHeight + statusHeight
         + DIALOG_PAD + BUTTON_HEIGHT + DIALOG_PAD)
+end
+
+local function reminderChoiceRow(index)
+    local row = reminderChoiceRows[index]
+    if row then return row end
+    row = CreateFrame("Frame", nil, reminderChoices)
+    row:SetHeight(REMINDER_CHOICE_HEIGHT)
+    row:SetPoint("TOPLEFT", 0, -(index - 1) * REMINDER_CHOICE_HEIGHT)
+    row:SetPoint("TOPRIGHT", 0, -(index - 1) * REMINDER_CHOICE_HEIGHT)
+    row.switch = makeButton(row, S.SWITCH, 90, "primary")
+    row.switch:SetPoint("RIGHT")
+    row.text = makeText(row, 12, C.textLight)
+    row.text:SetPoint("LEFT")
+    row.text:SetPoint("RIGHT", row.switch, "LEFT", -8, 0)
+    row.text:SetJustifyH("LEFT")
+    row.text:SetWordWrap(false)
+    reminderChoiceRows[index] = row
+    return row
+end
+
+-- Each Switch button on the reminder with the loadout it switches to.
+local function reminderSwitches()
+    local choices = reminderMatch and reminderMatch.choices
+    if not choices then return { { button = reminderSwitch, configID = reminderMatch and reminderMatch.configID } } end
+    local switches = {}
+    for index, choice in ipairs(choices) do
+        switches[index] = { button = reminderChoiceRows[index].switch, configID = choice.configID }
+    end
+    return switches
+end
+
+local function updateReminderSwitches(blocker)
+    for _, switch in ipairs(reminderSwitches()) do
+        switch.button:SetEnabled(not (blocker or LuckyLoadouts.Loadouts:GetSwitchBlocker(switch.configID)))
+    end
+end
+
+local function setReminderApplying(applying)
+    reminderApply:SetShown(applying)
+    for _, switch in ipairs(reminderSwitches()) do switch.button:SetShown(not applying) end
 end
 
 local function setReminderStatus(message, errorState)
@@ -485,6 +703,10 @@ local function createReminder()
     reminderText:SetPoint("TOPLEFT", DIALOG_PAD, -REMINDER_TEXT_TOP)
     reminderText:SetPoint("RIGHT", -DIALOG_PAD, 0)
     reminderText:SetJustifyH("LEFT")
+    reminderChoices = CreateFrame("Frame", nil, reminder)
+    reminderChoices:SetPoint("TOPLEFT", reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
+    reminderChoices:SetPoint("RIGHT", -DIALOG_PAD, 0)
+    reminderChoices:Hide()
     reminderStatus = makeText(reminder, 11, C.textMuted)
     reminderStatus:SetPoint("TOPLEFT", reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
     reminderStatus:SetPoint("RIGHT", -DIALOG_PAD, 0)
@@ -553,20 +775,16 @@ function SettingsUI:Init(accountDB, characterDB)
         end
         if kind == "applyRequired" then
             managerApply:SetShown(not quickDeleteMode)
-            reminderSwitch:Hide()
-            reminderApply:Show()
+            setReminderApplying(true)
         elseif kind == "switched" or kind == "switchFailed" then
             managerApply:Hide()
-            reminderApply:Hide()
-            reminderSwitch:Show()
+            setReminderApplying(false)
         end
         if reminder:IsShown() and reminderMatch then
-            reminderSwitch:SetEnabled(not LuckyLoadouts.Loadouts:GetSwitchBlocker(reminderMatch.configID))
+            updateReminderSwitches()
             if kind == "switchFailed" then
                 C_Timer.After(0, function()
-                    if reminder:IsShown() and reminderMatch then
-                        reminderSwitch:SetEnabled(not LuckyLoadouts.Loadouts:GetSwitchBlocker(reminderMatch.configID))
-                    end
+                    if reminder:IsShown() and reminderMatch then updateReminderSwitches() end
                 end)
             end
         end
@@ -608,8 +826,6 @@ local function fitManager(contentHeight)
     managerInner:SetSize(MANAGER_WIDTH - 2 - gutter, math.max(contentHeight, 1))
 end
 
-local SITUATION_ORDER = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
-
 -- Each loadout's assigned categories, then its instance overrides by name.
 local function situationsByConfig(specID)
     local data = LuckyLoadouts.GetSpecAssignments(charDB, specID)
@@ -618,7 +834,7 @@ local function situationsByConfig(specID)
         situations[configID] = situations[configID] or {}
         table.insert(situations[configID], label)
     end
-    for _, category in ipairs(SITUATION_ORDER) do
+    for _, category in ipairs(CATEGORY_ORDER) do
         local configID = data.categories[category]
         if configID then add(configID, S.SITUATIONS[category]) end
     end
@@ -626,6 +842,9 @@ local function situationsByConfig(specID)
     for instanceID, entry in pairs(data.instances) do
         if entry.configID then
             instances[#instances + 1] = { configID = entry.configID, label = entry.label or tostring(instanceID) }
+        end
+        for _, boss in pairs(type(entry.bosses) == "table" and entry.bosses or {}) do
+            instances[#instances + 1] = { configID = boss.configID, label = boss.label }
         end
     end
     table.sort(instances, function(a, b) return a.label < b.label end)
@@ -695,18 +914,38 @@ function SettingsUI:RefreshAssignments()
     for category, row in pairs(assignCategoryRows) do
         row.picker:SetText(assignedName(data.categories[category], byID))
     end
+    refreshSeason(data, byID)
 end
 
 function SettingsUI:ShowReminder(match, snapshot)
     reminderMatch = match
     local accent = LuckyUI.C.goldPrimary
-    local loadoutName = CreateColor(accent[1], accent[2], accent[3]):WrapTextInColorCode(match.target.name)
-    reminderText:SetText(string.format(S.REMINDER_TEXT, match.label or snapshot.label, loadoutName))
+    local function loadoutName(target)
+        return CreateColor(accent[1], accent[2], accent[3]):WrapTextInColorCode(target.name)
+    end
+    local choices = match.choices
+    if choices then
+        reminderText:SetText(S.REMINDER_CHOOSE)
+        for index, choice in ipairs(choices) do
+            local row = reminderChoiceRow(index)
+            row.text:SetText(string.format(S.REMINDER_CHOICE, choice.label, loadoutName(choice.target)))
+            row.switch:SetScript("OnClick", function()
+                LuckyLoadouts.Loadouts:RequestSwitch(choice.configID, "reminder")
+            end)
+            row:Show()
+        end
+        for index = #choices + 1, #reminderChoiceRows do reminderChoiceRows[index]:Hide() end
+        reminderChoices:SetHeight(#choices * REMINDER_CHOICE_HEIGHT)
+    else
+        reminderText:SetText(string.format(S.REMINDER_TEXT, match.label or snapshot.label, loadoutName(match.target)))
+    end
+    reminderChoices:SetShown(choices ~= nil)
+    reminderStatus:SetPoint("TOPLEFT", choices and reminderChoices or reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
+    reminderSwitch:SetShown(not choices)
+    setReminderApplying(false)
+    updateReminderSwitches()
     local blocker = LuckyLoadouts.Loadouts:GetSwitchBlocker(match.configID)
     setReminderStatus(blocker or "", blocker ~= nil)
-    reminderSwitch:SetEnabled(not blocker)
-    reminderSwitch:Show()
-    reminderApply:Hide()
     reminder:Show()
 end
 
@@ -717,6 +956,6 @@ end
 function SettingsUI:SetReminderCombat(inCombat)
     if not reminder or not reminder:IsShown() or not reminderMatch then return end
     local blocker = inCombat and S.IN_COMBAT or LuckyLoadouts.Loadouts:GetSwitchBlocker(reminderMatch.configID)
-    reminderSwitch:SetEnabled(not blocker)
+    updateReminderSwitches(inCombat and S.IN_COMBAT or nil)
     setReminderStatus(blocker or "", blocker ~= nil)
 end

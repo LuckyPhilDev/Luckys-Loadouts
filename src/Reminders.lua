@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts
+-- luacheck: globals LuckyLoadouts C_RaidLocks RequestRaidInfo
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Reminders = {}
@@ -9,6 +9,8 @@ local characterDB
 local controller
 local eventFrame
 local latestSnapshot
+local visitKills = {}
+local visitRaid
 local categories = { Dungeon = true, Raid = true, Battleground = true, Arena = true, OpenWorld = true, Delve = true }
 
 local function activeDelveState()
@@ -23,6 +25,24 @@ local function snapshotKey(category, instanceID)
     return category .. ":" .. tostring(instanceID or 0)
 end
 
+-- Kills seen this visit cover what the lockout does not know yet, or at all in
+-- Raid Finder, which keeps no lockout.
+local function nextBosses(instanceID, difficultyID)
+    local raid = instanceID .. ":" .. tostring(difficultyID)
+    if visitRaid ~= raid then
+        visitRaid = raid
+        visitKills = {}
+    end
+    local journalID = LuckyLoadouts.Journal.CurrentJournalID()
+    if not journalID then return nil end
+    local function isKilled(boss)
+        if visitKills[boss.dungeonEncounterID] then return true end
+        return C_RaidLocks.IsEncounterComplete(instanceID, boss.dungeonEncounterID, difficultyID) and true or false
+    end
+    return LuckyLoadouts.Journal.AvailableBosses(LuckyLoadouts.Journal.Bosses(journalID),
+        LuckyLoadouts.Constants.RAID_LAYOUTS[journalID], isKilled)
+end
+
 function Reminders.ClassifyContent()
     local inInstance, instanceType = IsInInstance()
     if inInstance == nil then return nil, S.UNKNOWN_CONTENT end
@@ -34,7 +54,7 @@ function Reminders.ClassifyContent()
             key = "OpenWorld" }
     end
 
-    local name, infoType, _, _, _, _, _, instanceID = GetInstanceInfo()
+    local name, infoType, difficultyID, _, _, _, _, instanceID = GetInstanceInfo()
     instanceType = infoType and infoType ~= "" and infoType or instanceType
     if type(name) ~= "string" or name == "" or type(instanceID) ~= "number" then
         return nil, S.UNKNOWN_CONTENT
@@ -50,17 +70,72 @@ function Reminders.ClassifyContent()
     local byType = { party = "Dungeon", raid = "Raid", pvp = "Battleground", arena = "Arena" }
     local category = byType[instanceType]
     if not category then return nil, S.UNKNOWN_CONTENT end
-    return { category = category, instanceID = instanceID, label = name,
+    local snapshot = { category = category, instanceID = instanceID, label = name,
         key = snapshotKey(category, instanceID) }
+    if category == "Raid" then
+        snapshot.bosses = nextBosses(instanceID, difficultyID)
+        -- A kill that opens new bosses is a new visit, so a dismissed reminder can return.
+        for _, boss in ipairs(snapshot.bosses or {}) do
+            snapshot.key = snapshot.key .. ":" .. tostring(boss.encounterID)
+        end
+    end
+    return snapshot
+end
+
+-- One choice per loadout the next bosses want, bosses sharing one grouped.
+local function resolveBosses(entry, snapshot, loadoutsByID)
+    if type(entry.bosses) ~= "table" or not snapshot.bosses or not loadoutsByID then return nil end
+    local choices, byConfig = {}, {}
+    for _, boss in ipairs(snapshot.bosses) do
+        local assigned = entry.bosses[boss.encounterID]
+        local configID = type(assigned) == "table" and assigned.configID
+        local target = configID and loadoutsByID[configID]
+        if target then
+            local choice = byConfig[configID]
+            if choice then
+                choice.label = choice.label .. ", " .. boss.name
+            else
+                choice = { configID = configID, label = boss.name, target = target }
+                byConfig[configID] = choice
+                choices[#choices + 1] = choice
+            end
+        end
+    end
+    if #choices == 0 then return nil end
+    local ids = {}
+    for index, choice in ipairs(choices) do ids[index] = choice.configID end
+    local first = choices[1]
+    return {
+        configID = first.configID,
+        source = "boss:" .. table.concat(ids, ","),
+        label = first.label,
+        target = first.target,
+        valid = true,
+        choices = #choices > 1 and choices or nil,
+    }
+end
+
+function Reminders.Offers(match, configID)
+    if match.configID == configID then return true end
+    for _, choice in ipairs(match.choices or {}) do
+        if choice.configID == configID then return true end
+    end
+    return false
 end
 
 function Reminders.ResolveAssignment(assignments, snapshot, loadoutsByID)
     if type(assignments) ~= "table" or type(snapshot) ~= "table" then return nil end
     local configID, source, label
-    if (snapshot.category == "Dungeon" or snapshot.category == "Raid")
-        and type(assignments.instances) == "table"
-        and assignments.instances[snapshot.instanceID] ~= nil then
-        local override = assignments.instances[snapshot.instanceID]
+    local instances = type(assignments.instances) == "table" and assignments.instances or {}
+    local override = instances[snapshot.instanceID]
+    local instanceContent = snapshot.category == "Dungeon" or snapshot.category == "Raid"
+    local usable = instanceContent and type(override) == "table" and override.category == snapshot.category
+    if usable then
+        local bossMatch = resolveBosses(override, snapshot, loadoutsByID)
+        if bossMatch then return bossMatch end
+    end
+    -- An entry holding only boss assignments leaves the rest of the instance to its category.
+    if instanceContent and override ~= nil and not (usable and override.configID == nil) then
         source = "instance:" .. tostring(snapshot.instanceID)
         label = type(override) == "table" and override.label or snapshot.label
         if type(override) ~= "table" or override.category ~= snapshot.category
@@ -117,7 +192,7 @@ function Reminders.CreateController(callbacks)
         local assignments = self.callbacks.getAssignments(specID)
         local byID, selectedID = self.callbacks.getLoadouts(specID)
         local match = Reminders.ResolveAssignment(assignments, snapshot, byID)
-        if not match or match.valid ~= true or selectedID == match.configID then
+        if not match or match.valid ~= true or Reminders.Offers(match, selectedID) then
             self.deferred = nil
             self:Hide()
             return
@@ -150,7 +225,7 @@ function Reminders.CreateController(callbacks)
     end
 
     function state:Switched(request)
-        if not self.visible or not request or self.visible.configID == request.id then self:Hide() end
+        if not self.visible or not request or Reminders.Offers(self.visible, request.id) then self:Hide() end
     end
 
     function state:AssignmentChanged(specID)
@@ -225,8 +300,14 @@ function Reminders:Init(db)
     eventFrame:RegisterEvent("TRAIT_CONFIG_LIST_UPDATED")
     eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    eventFrame:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_REGEN_DISABLED" then
+    eventFrame:RegisterEvent("BOSS_KILL")
+    eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")
+    eventFrame:SetScript("OnEvent", function(_, event, encounterID)
+        if event == "PLAYER_ENTERING_WORLD" then
+            RequestRaidInfo()
+        elseif event == "BOSS_KILL" then
+            visitKills[encounterID] = true
+        elseif event == "PLAYER_REGEN_DISABLED" then
             controller:CombatChanged(true)
         elseif event == "PLAYER_REGEN_ENABLED" then
             controller:CombatChanged(false)
@@ -291,6 +372,26 @@ function Reminders:SetCurrentInstance(specID, configID)
         category = snapshot.category,
         label = snapshot.label,
     }
+    self:AssignmentChanged(specID)
+    return true
+end
+
+-- A nil boss assigns the whole instance and a nil configID clears. An instance
+-- left with nothing assigned is dropped rather than kept empty.
+function Reminders:SetInstanceAssignment(specID, instance, boss, configID)
+    local data = LuckyLoadouts.GetSpecAssignments(characterDB, specID)
+    if not data or type(instance) ~= "table" or type(instance.id) ~= "number" then return false end
+    if configID ~= nil and type(configID) ~= "number" then return false end
+    local entry = type(data.instances[instance.id]) == "table" and data.instances[instance.id] or {}
+    data.instances[instance.id] = entry
+    entry.category, entry.label = instance.category, instance.label
+    if boss then
+        entry.bosses = type(entry.bosses) == "table" and entry.bosses or {}
+        entry.bosses[boss.encounterID] = configID and { configID = configID, label = boss.name } or nil
+    else
+        entry.configID = configID
+    end
+    if entry.configID == nil and not next(entry.bosses or {}) then data.instances[instance.id] = nil end
     self:AssignmentChanged(specID)
     return true
 end
