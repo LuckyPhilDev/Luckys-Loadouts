@@ -126,7 +126,9 @@ local function createManager()
 
     managerAssign = makeIconButton(managerBar, "target", S.ASSIGN_TOOLTIP, 16)
     managerAssign:SetPoint("RIGHT", managerBar, "RIGHT", -34, 0)
-    managerAssign:SetScript("OnClick", function() showAssignments() end)
+    managerAssign:SetScript("OnClick", function()
+        if assignDialog:IsShown() then assignDialog:Hide() else showAssignments() end
+    end)
     managerNew = makeIconButton(managerBar, "plus", S.NEW_TOOLTIP, 16)
     managerNew:SetPoint("RIGHT", managerAssign, "LEFT", -4, 0)
     managerNew:SetScript("OnClick", function()
@@ -565,6 +567,11 @@ local function createAssignmentDialog()
 
     assignDialog:ClearAllPoints()
     assignDialog:SetPoint("TOPLEFT", manager, "TOPRIGHT", 6, 0)
+    -- The manager closes with the Talents window, so its dialogs go with it.
+    manager:HookScript("OnHide", function()
+        assignDialog:Hide()
+        renameDialog:Hide()
+    end)
 end
 
 function showAssignments()
