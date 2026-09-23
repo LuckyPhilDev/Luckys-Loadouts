@@ -40,7 +40,10 @@ function Journal.Season()
     return found
 end
 
+local bossesByInstance = {}
+
 function Journal.Bosses(journalID)
+    if bossesByInstance[journalID] then return bossesByInstance[journalID] end
     EJ_SelectInstance(journalID)
     local bosses = {}
     for index = 1, 50 do
@@ -50,6 +53,7 @@ function Journal.Bosses(journalID)
         bosses[index] = { encounterID = encounterID, dungeonEncounterID = dungeonEncounterID, name = name,
             portrait = portrait or "Interface\\EncounterJournal\\UI-EJ-BOSS-Default" }
     end
+    if #bosses > 0 then bossesByInstance[journalID] = bosses end
     return bosses
 end
 

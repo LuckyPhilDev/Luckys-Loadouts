@@ -400,29 +400,32 @@ local function showLoadoutPicker(owner, list, onSelect)
     end)
 end
 
-local ASSIGN_WIDTH = 440
+local ASSIGN_WIDTH = 500
+local ASSIGN_MAX_HEIGHT = 640
+local ASSIGN_PICKER_WIDTH = 190
+-- The scroll area starts below the status line; offsets after this are inside it.
+local ASSIGN_SCROLL_TOP = 60
+local ASSIGN_CONTENT_WIDTH = ASSIGN_WIDTH - 2 - SCROLLBAR_GUTTER
 local ASSIGN_ROW_HEIGHT = 32
-local ASSIGN_ROWS_TOP = 81
+local CATEGORY_HEADER_TOP = 9
+local CATEGORY_ROWS_TOP = 21
 local CATEGORY_ORDER = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
-local SEASON_HEADER_TOP = ASSIGN_ROWS_TOP + #CATEGORY_ORDER * ASSIGN_ROW_HEIGHT + 12
-local TILES_TOP = SEASON_HEADER_TOP + 16
+local SECTION_GAP = 12
+local HEADER_TO_CONTENT = 16
+local DUNGEON_HEADER_TOP = CATEGORY_ROWS_TOP + #CATEGORY_ORDER * ASSIGN_ROW_HEIGHT + SECTION_GAP
+local TILES_TOP = DUNGEON_HEADER_TOP + HEADER_TO_CONTENT
 local TILES_PER_ROW = 4
 local TILE_GAP = 8
-local TILE_WIDTH = (ASSIGN_WIDTH - DIALOG_PAD * 2 - TILE_GAP * (TILES_PER_ROW - 1)) / TILES_PER_ROW
-local TILE_HEIGHT = 53
+local TILE_WIDTH = (ASSIGN_CONTENT_WIDTH - DIALOG_PAD * 2 - TILE_GAP * (TILES_PER_ROW - 1)) / TILES_PER_ROW
+local TILE_HEIGHT = 58
 -- The Adventure Guide draws only this corner of its instance art.
 local EJ_ART_COORDS = { 0, 0.68359375, 0, 0.7421875 }
--- The same art trimmed to the 2:1 of a boss portrait.
-local EJ_ART_ROW_COORDS = { 0, 0.68359375, 0.03, 0.71 }
-local FULL_COORDS = { 0, 1, 0, 1 }
-local INSTANCE_WIDTH = 420
-local INSTANCE_ROW_HEIGHT = 40
-local seasonTiles = {}
-local instanceDialog
-local instanceTitle
-local instanceRows = {}
-local assignInstance
-local assignBosses = {}
+-- A boss portrait is 2:1, a little wider than a tile, so its sides are trimmed.
+local PORTRAIT_COORDS = { 0.04, 0.96, 0, 1 }
+local assignScroll
+local assignContent
+local raidHeaders = {}
+local tiles = {}
 
 local function reportAssignment(loadout, name)
     local message = loadout and string.format(S.ASSIGNED, loadout.name, name) or string.format(S.CLEARED, name)
@@ -430,9 +433,16 @@ local function reportAssignment(loadout, name)
     SettingsUI:RefreshAssignments()
 end
 
+local function makeSectionHeader(text, top)
+    local header = makeText(assignContent, 10, C.goldPrimary)
+    header:SetPoint("TOPLEFT", 16, -top)
+    header:SetText(text)
+    return header
+end
+
 -- The owner sets row.assign(specID, loadout), with a nil loadout to clear.
-local function createAssignRow(parent, top, height, pickerWidth)
-    local row = CreateFrame("Frame", nil, parent)
+local function createAssignRow(top, height)
+    local row = CreateFrame("Frame", nil, assignContent)
     row:SetHeight(height)
     row:SetPoint("TOPLEFT", 12, -top)
     row:SetPoint("TOPRIGHT", -12, -top)
@@ -440,7 +450,7 @@ local function createAssignRow(parent, top, height, pickerWidth)
     row.clear:SetPoint("RIGHT", -4, 0)
     row.edit = makeIconButton(row, "square-pen", S.EDIT, 16)
     row.edit:SetPoint("RIGHT", -24, 0)
-    row.picker = makeButton(row, S.NONE, pickerWidth)
+    row.picker = makeButton(row, S.NONE, ASSIGN_PICKER_WIDTH)
     row.picker:SetPoint("RIGHT", row.edit, "LEFT", -6, 0)
     row.label = makeText(row, 12, C.textLight)
     row.label:SetPoint("LEFT", 4, 0)
@@ -453,70 +463,73 @@ local function createAssignRow(parent, top, height, pickerWidth)
         if not list then return end
         showLoadoutPicker(owner, list, function(loadout) row.assign(specID, loadout) end)
     end
+    row.picker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row.picker:SetScript("OnClick", pickLoadout)
     row.edit:SetScript("OnClick", pickLoadout)
     row.clear:SetScript("OnClick", function() row.assign(LuckyLoadouts.Loadouts:GetCurrentSpec(), nil) end)
     return row
 end
 
--- Clicking the open instance again closes its panel.
-local function chooseInstance(instance)
-    local reopened = assignInstance and assignInstance.journalID == instance.journalID
-    assignInstance = not reopened and instance or nil
-    assignBosses = assignInstance and assignInstance.category == "Raid"
-        and LuckyLoadouts.Journal.Bosses(assignInstance.journalID) or {}
-    SettingsUI:RefreshAssignments()
+local function showTilePicker(tile)
+    local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
+    local list = LuckyLoadouts.Loadouts:Read(specID)
+    if not list then return end
+    MenuUtil.CreateContextMenu(tile, function(_, rootDescription)
+        rootDescription:CreateTitle(tile.title)
+        for _, loadout in ipairs(list) do
+            rootDescription:CreateButton(loadout.name, function() tile.assign(specID, loadout) end)
+        end
+        rootDescription:CreateDivider()
+        rootDescription:CreateButton(S.CLEAR, function() tile.assign(specID, nil) end)
+    end)
 end
 
 local function showTileTooltip(tile)
     GameTooltip:SetOwner(tile, "ANCHOR_TOP")
-    GameTooltip:SetText(tile.instance.label)
+    GameTooltip:SetText(tile.title)
     GameTooltip:Show()
 end
 
-local function seasonTile(index)
-    local tile = seasonTiles[index]
-    if tile then return tile end
-    tile = CreateFrame("Button", nil, assignDialog, "BackdropTemplate")
+-- The owner sets tile.title and tile.assign(specID, loadout), a nil loadout clearing.
+local function createTile()
+    local tile = CreateFrame("Button", nil, assignContent, "BackdropTemplate")
     tile:SetSize(TILE_WIDTH, TILE_HEIGHT)
-    local column, line = (index - 1) % TILES_PER_ROW, math.floor((index - 1) / TILES_PER_ROW)
-    tile:SetPoint("TOPLEFT", DIALOG_PAD + column * (TILE_WIDTH + TILE_GAP), -(TILES_TOP + line * (TILE_HEIGHT + TILE_GAP)))
     tile:SetBackdrop(LuckyUI.Backdrop)
-    tile:SetBackdropColor(0, 0, 0, 0)
+    tile:SetBackdropColor(C.bgInput[1], C.bgInput[2], C.bgInput[3], C.bgInput[4])
     tile.art = tile:CreateTexture(nil, "ARTWORK")
     tile.art:SetPoint("TOPLEFT", 1, -1)
     tile.art:SetPoint("BOTTOMRIGHT", -1, 1)
     tile.art:SetTexCoord(unpack(EJ_ART_COORDS))
-    local shade = tile:CreateTexture(nil, "ARTWORK", nil, 1)
+    tile.portrait = tile:CreateTexture(nil, "ARTWORK", nil, 1)
+    tile.portrait:SetAllPoints(tile.art)
+    tile.portrait:SetTexCoord(unpack(PORTRAIT_COORDS))
+    local shade = tile:CreateTexture(nil, "ARTWORK", nil, 2)
     shade:SetPoint("BOTTOMLEFT", 1, 1)
     shade:SetPoint("BOTTOMRIGHT", -1, 1)
-    shade:SetHeight(16)
+    shade:SetHeight(28)
     shade:SetColorTexture(0, 0, 0, 0.75)
+    tile.loadout = makeText(tile, 10, C.goldPrimary)
+    tile.loadout:SetPoint("BOTTOMLEFT", 5, 4)
+    tile.loadout:SetPoint("BOTTOMRIGHT", -5, 4)
+    tile.loadout:SetJustifyH("LEFT")
+    tile.loadout:SetWordWrap(false)
     tile.name = makeText(tile, 10, C.textLight)
-    tile.name:SetPoint("BOTTOMLEFT", 5, 4)
-    tile.name:SetPoint("BOTTOMRIGHT", -5, 4)
+    tile.name:SetPoint("BOTTOMLEFT", tile.loadout, "TOPLEFT", 0, 2)
+    tile.name:SetPoint("BOTTOMRIGHT", tile.loadout, "TOPRIGHT", 0, 2)
     tile.name:SetJustifyH("LEFT")
     tile.name:SetWordWrap(false)
     local hover = tile:CreateTexture(nil, "HIGHLIGHT")
     hover:SetAllPoints(tile.art)
     hover:SetColorTexture(1, 1, 1, 0.1)
-    tile:SetScript("OnClick", function() chooseInstance(tile.instance) end)
+    tile:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    tile:SetScript("OnClick", showTilePicker)
     tile:SetScript("OnEnter", showTileTooltip)
     tile:SetScript("OnLeave", GameTooltip_Hide)
-    seasonTiles[index] = tile
     return tile
 end
 
-local function instanceRow(index)
-    local row = instanceRows[index]
-    if row then return row end
-    row = createAssignRow(instanceDialog, CONTENT_TOP + (index - 1) * INSTANCE_ROW_HEIGHT, INSTANCE_ROW_HEIGHT, 170)
-    row.art = row:CreateTexture(nil, "ARTWORK")
-    row.art:SetSize(64, 32)
-    row.art:SetPoint("LEFT", 4, 0)
-    row.label:SetPoint("LEFT", row.art, "RIGHT", 8, 0)
-    instanceRows[index] = row
-    return row
+local function sectionHeight(count)
+    return math.ceil(count / TILES_PER_ROW) * (TILE_HEIGHT + TILE_GAP) - TILE_GAP
 end
 
 local function createAssignmentDialog()
@@ -531,13 +544,16 @@ local function createAssignmentDialog()
     assignStatus:SetPoint("RIGHT", -16, 0)
     assignStatus:SetJustifyH("LEFT")
 
-    local categoryHeader = makeText(assignDialog, 10, C.goldPrimary)
-    categoryHeader:SetPoint("TOPLEFT", 16, -69)
-    categoryHeader:SetText(S.CATEGORY_DEFAULTS)
+    assignScroll = CreateFrame("ScrollFrame", nil, assignDialog, "UIPanelScrollFrameTemplate")
+    assignScroll:SetPoint("TOPLEFT", 1, -ASSIGN_SCROLL_TOP)
+    assignScroll:SetPoint("BOTTOMRIGHT", -1 - SCROLLBAR_GUTTER, 1)
+    assignContent = CreateFrame("Frame", nil, assignScroll)
+    assignContent:SetSize(ASSIGN_CONTENT_WIDTH, 1)
+    assignScroll:SetScrollChild(assignContent)
 
+    makeSectionHeader(S.CATEGORY_DEFAULTS, CATEGORY_HEADER_TOP)
     for index, category in ipairs(CATEGORY_ORDER) do
-        local row = createAssignRow(assignDialog, ASSIGN_ROWS_TOP + (index - 1) * ASSIGN_ROW_HEIGHT,
-            ASSIGN_ROW_HEIGHT, 220)
+        local row = createAssignRow(CATEGORY_ROWS_TOP + (index - 1) * ASSIGN_ROW_HEIGHT, ASSIGN_ROW_HEIGHT)
         row.label:SetText(S.CATEGORIES[category])
         row.assign = function(specID, loadout)
             LuckyLoadouts.Reminders:SetCategory(specID, category, loadout and loadout.id)
@@ -545,96 +561,100 @@ local function createAssignmentDialog()
         end
         assignCategoryRows[category] = row
     end
-
-    local seasonHeader = makeText(assignDialog, 10, C.goldPrimary)
-    seasonHeader:SetPoint("TOPLEFT", 16, -SEASON_HEADER_TOP)
-    seasonHeader:SetText(S.CURRENT_SEASON)
+    makeSectionHeader(S.DUNGEONS_HEADER, DUNGEON_HEADER_TOP)
 
     assignDialog:ClearAllPoints()
     assignDialog:SetPoint("TOPLEFT", manager, "TOPRIGHT", 6, 0)
-
-    local instanceBar
-    instanceDialog, instanceBar, instanceTitle = makeSurface("LuckyLoadoutsInstanceDialog", INSTANCE_WIDTH, 200,
-        "manager", "")
-    instanceDialog:SetMovable(false)
-    instanceBar:SetScript("OnDragStart", nil)
-    instanceBar:SetScript("OnDragStop", nil)
-    instanceDialog:ClearAllPoints()
-    instanceDialog:SetPoint("TOPLEFT", assignDialog, "TOPRIGHT", 6, 0)
-    -- Closing the panel, Escape included, deselects its tile.
-    instanceDialog:SetScript("OnHide", function()
-        assignInstance = nil
-        SettingsUI:RefreshAssignments()
-    end)
-    assignDialog:HookScript("OnHide", function() instanceDialog:Hide() end)
 end
 
--- Opening inside a season dungeon or raid starts with it open.
 function showAssignments()
     setStatus(assignStatus, "", false)
-    local journalID = IsInInstance() and LuckyLoadouts.Journal.CurrentJournalID()
-    for _, instance in ipairs(journalID and LuckyLoadouts.Journal.Season() or {}) do
-        local open = assignInstance and assignInstance.journalID == journalID
-        if instance.journalID == journalID and not open then chooseInstance(instance) end
-    end
     assignDialog:Show()
     SettingsUI:RefreshAssignments()
 end
 
-local function refreshInstanceRows(data, byID)
-    if not assignInstance then
-        instanceDialog:Hide()
-        return
-    end
-    local targets = { { label = S.WHOLE_INSTANCE, name = assignInstance.label, art = assignInstance.art,
-        coords = EJ_ART_ROW_COORDS } }
-    for _, boss in ipairs(assignBosses) do
-        targets[#targets + 1] = { label = boss.name, name = boss.name, boss = boss, art = boss.portrait,
-            coords = FULL_COORDS }
-    end
-    local entry = data.instances[assignInstance.id]
-    entry = type(entry) == "table" and entry or {}
-    for index, target in ipairs(targets) do
-        local row = instanceRow(index)
-        local configID = entry.configID
-        if target.boss then
-            local assigned = type(entry.bosses) == "table" and entry.bosses[target.boss.encounterID]
-            configID = type(assigned) == "table" and assigned.configID or nil
-        end
-        row.art:SetTexture(target.art)
-        row.art:SetTexCoord(unpack(target.coords))
-        row.label:SetText(target.label)
-        row.picker:SetText(assignedName(configID, byID))
-        row.assign = function(specID, loadout)
-            LuckyLoadouts.Reminders:SetInstanceAssignment(specID, assignInstance, target.boss, loadout and loadout.id)
-            reportAssignment(loadout, target.name)
-        end
-        row:Show()
-    end
-    for index = #targets + 1, #instanceRows do instanceRows[index]:Hide() end
-    instanceTitle:SetText(assignInstance.label)
-    instanceDialog:SetHeight(CONTENT_TOP + #targets * INSTANCE_ROW_HEIGHT + DIALOG_PAD)
-    instanceDialog:Show()
+-- Grow to the content, capped at the Talents window's height when it is open.
+local function fitAssignments(contentHeight)
+    local talentsShown = PlayerSpellsFrame and PlayerSpellsFrame:IsShown()
+    local maxHeight = talentsShown and PlayerSpellsFrame:GetHeight() or ASSIGN_MAX_HEIGHT
+    local listHeight = math.min(contentHeight, maxHeight - ASSIGN_SCROLL_TOP - 1)
+    assignDialog:SetHeight(ASSIGN_SCROLL_TOP + listHeight + 1)
+    assignContent:SetHeight(contentHeight)
+    assignScroll.ScrollBar:SetShown(contentHeight > listHeight)
 end
 
--- Gold names mark instances with something assigned, a gold border the open one.
+-- Dungeon tiles, then each raid's name heading tiles for its bosses. A boss
+-- portrait stands on its raid's art, dimmed so the portrait reads first.
 local function refreshSeason(data, byID)
-    local season = LuckyLoadouts.Journal.Season()
-    for index, instance in ipairs(season) do
-        local tile = seasonTile(index)
-        tile.instance = instance
-        tile.art:SetTexture(instance.art)
-        tile.name:SetText(instance.label)
-        setTextColor(tile.name, data.instances[instance.id] and C.goldPrimary or C.textLight)
-        local open = assignInstance and assignInstance.journalID == instance.journalID
-        local border = open and C.goldPrimary or C.borderDark
+    local dungeons, raids = {}, {}
+    for _, instance in ipairs(LuckyLoadouts.Journal.Season()) do
+        table.insert(instance.category == "Raid" and raids or dungeons, instance)
+    end
+    -- The season's main raid leads; a one-boss raid is a side stop.
+    local journalOrder = {}
+    for index, raid in ipairs(raids) do journalOrder[raid] = index end
+    table.sort(raids, function(a, b)
+        local bossesA = #LuckyLoadouts.Journal.Bosses(a.journalID)
+        local bossesB = #LuckyLoadouts.Journal.Bosses(b.journalID)
+        if bossesA ~= bossesB then return bossesA > bossesB end
+        return journalOrder[a] < journalOrder[b]
+    end)
+
+    local used = 0
+    local function placeTile(top, slot, art, portrait, title, configID, assign)
+        used = used + 1
+        local tile = tiles[used] or createTile()
+        tiles[used] = tile
+        local column, line = (slot - 1) % TILES_PER_ROW, math.floor((slot - 1) / TILES_PER_ROW)
+        tile:SetPoint("TOPLEFT", DIALOG_PAD + column * (TILE_WIDTH + TILE_GAP), -(top + line * (TILE_HEIGHT + TILE_GAP)))
+        tile.art:SetTexture(art)
+        tile.art:SetAlpha(portrait and 0.35 or 1)
+        tile.portrait:SetTexture(portrait)
+        tile.portrait:SetShown(portrait ~= nil)
+        tile.name:SetText(title)
+        tile.loadout:SetText(configID and assignedName(configID, byID) or "")
+        local border = configID and C.goldAccent or C.borderDark
         tile:SetBackdropBorderColor(border[1], border[2], border[3])
+        tile.title, tile.assign = title, assign
         tile:Show()
     end
-    for index = #season + 1, #seasonTiles do seasonTiles[index]:Hide() end
-    local lines = math.ceil(#season / TILES_PER_ROW)
-    assignDialog:SetHeight(TILES_TOP + lines * (TILE_HEIGHT + TILE_GAP) - TILE_GAP + DIALOG_PAD)
-    refreshInstanceRows(data, byID)
+
+    for slot, instance in ipairs(dungeons) do
+        local entry = data.instances[instance.id]
+        placeTile(TILES_TOP, slot, instance.art, nil, instance.label,
+            type(entry) == "table" and entry.configID or nil,
+            function(specID, loadout)
+                LuckyLoadouts.Reminders:SetInstanceAssignment(specID, instance, nil, loadout and loadout.id)
+                reportAssignment(loadout, instance.label)
+            end)
+    end
+    local top = TILES_TOP + sectionHeight(#dungeons)
+
+    for raidIndex, raid in ipairs(raids) do
+        top = top + SECTION_GAP
+        local header = raidHeaders[raidIndex] or makeSectionHeader("", 0)
+        raidHeaders[raidIndex] = header
+        header:SetPoint("TOPLEFT", 16, -top)
+        header:SetText(raid.label:upper())
+        header:Show()
+        top = top + HEADER_TO_CONTENT
+        local entry = data.instances[raid.id]
+        local bossAssignments = type(entry) == "table" and type(entry.bosses) == "table" and entry.bosses or {}
+        local bosses = LuckyLoadouts.Journal.Bosses(raid.journalID)
+        for slot, boss in ipairs(bosses) do
+            local assigned = bossAssignments[boss.encounterID]
+            placeTile(top, slot, raid.art, boss.portrait, boss.name,
+                type(assigned) == "table" and assigned.configID or nil,
+                function(specID, loadout)
+                    LuckyLoadouts.Reminders:SetInstanceAssignment(specID, raid, boss, loadout and loadout.id)
+                    reportAssignment(loadout, boss.name)
+                end)
+        end
+        top = top + sectionHeight(#bosses)
+    end
+    for index = #raids + 1, #raidHeaders do raidHeaders[index]:Hide() end
+    for index = used + 1, #tiles do tiles[index]:Hide() end
+    fitAssignments(top + DIALOG_PAD)
 end
 
 local REMINDER_WIDTH = 380

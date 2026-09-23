@@ -5,7 +5,7 @@
 ### Added
 
 - **Loadout order** Drag loadouts in the manager into the order you want. Your order is saved for each specialization and is used by the Assign menu too.
-- **Dungeon, raid and boss loadouts** The Assign panel shows this season's dungeons and raids. Click one to give it, and each of its raid bosses, a loadout. After each kill, the reminder offers the loadout for the bosses you can pull next.
+- **Dungeon, raid and boss loadouts** The Assign panel shows this season's dungeons and raids, with every raid boss listed, so each can have its own loadout. After each kill, the reminder offers the loadout for the bosses you can pull next.
 
 ## [1.0.0]
 
