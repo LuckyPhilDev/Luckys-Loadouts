@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Loadout order** Drag loadouts in the manager into the order you want. Your order is saved for each specialization and is used by the Assign menu too.
+
 ## [1.0.0]
 
 ### Added

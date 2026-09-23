@@ -5,6 +5,7 @@ LuckyLoadouts.Loadouts = {}
 
 local Loadouts = LuckyLoadouts.Loadouts
 local S
+local charDB
 local listeners = {}
 local pending
 local renamePending
@@ -128,8 +129,9 @@ local function markSelected(specID, configID)
     end
 end
 
-function Loadouts:Init()
+function Loadouts:Init(characterDB)
     S = LuckyLoadouts.Strings
+    charDB = characterDB
 end
 
 function Loadouts:AddListener(listener)
@@ -161,7 +163,13 @@ function Loadouts:Read(specID)
             byID[configID] = entry
         end
     end
+    -- Loadouts the player has not placed yet (new ones) follow, alphabetically.
+    local spec = LuckyLoadouts.GetSpecAssignments(charDB, specID)
+    local rank = {}
+    for position, configID in ipairs(spec and spec.order or {}) do rank[configID] = position end
     table.sort(list, function(a, b)
+        local rankA, rankB = rank[a.id] or math.huge, rank[b.id] or math.huge
+        if rankA ~= rankB then return rankA < rankB end
         if a.name == b.name then return a.id < b.id end
         return a.name < b.name
     end)
@@ -308,6 +316,25 @@ function Loadouts:Rename(configID, value)
     renamePending = { id = configID, specID = specID, name = name, token = nextToken }
     startRenameTimeout(nextToken)
     self:ObserveNativeState()
+    return true
+end
+
+-- Blizzard has no ordering API, so this only reorders the addon's own lists.
+function Loadouts:Move(configID, toIndex)
+    local specID = currentSpec()
+    if not specID then return false, S.NO_SPEC end
+    local list, err = self:Read(specID)
+    if not list then return false, err end
+    local order, from = {}, nil
+    for position, entry in ipairs(list) do
+        order[position] = entry.id
+        if entry.id == configID then from = position end
+    end
+    if not from then return false, S.LOADOUT_MISSING end
+    if not order[toIndex] then return false end
+    table.insert(order, toIndex, table.remove(order, from))
+    LuckyLoadouts.GetSpecAssignments(charDB, specID).order = order
+    emit("refreshed")
     return true
 end
 

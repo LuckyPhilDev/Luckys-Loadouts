@@ -19,6 +19,8 @@ local managerNew
 local managerQuickDelete
 local managerHint
 local quickDeleteMode = false
+local dragRow
+local dropLine
 local renameDialog
 local renameTitle
 local renamePrompt
@@ -156,6 +158,11 @@ local function createManager()
     managerInner:SetSize(MANAGER_WIDTH - 2, 1)
     managerScroll:SetScrollChild(managerInner)
 
+    dropLine = managerInner:CreateTexture(nil, "OVERLAY")
+    dropLine:SetHeight(2)
+    dropLine:SetColorTexture(C.goldPrimary[1], C.goldPrimary[2], C.goldPrimary[3], 1)
+    dropLine:Hide()
+
     emptyText = makeText(managerInner, 12, C.textMuted)
     emptyText:SetPoint("TOPLEFT", 10, -18)
     emptyText:SetPoint("RIGHT", -10, 0)
@@ -240,6 +247,43 @@ local function showRowMenu(owner, entry)
     end)
 end
 
+-- The gap between rows the cursor is nearest, 1 being above the first row.
+local function dropSlot()
+    local _, cursorY = GetCursorPosition()
+    local offset = managerInner:GetTop() - cursorY / managerInner:GetEffectiveScale()
+    local slot = math.floor(offset / MANAGER_ROW_HEIGHT + 0.5) + 1
+    return math.max(1, math.min(slot, dragRow.count + 1))
+end
+
+local function placeDropLine()
+    local y = math.min((dropSlot() - 1) * MANAGER_ROW_HEIGHT, dragRow.count * MANAGER_ROW_HEIGHT - 2)
+    dropLine:SetPoint("TOPLEFT", 0, -y)
+    dropLine:SetPoint("TOPRIGHT", 0, -y)
+end
+
+local function startDrag(row)
+    if quickDeleteMode then return end
+    row.dragged = true
+    dragRow = row
+    row:SetAlpha(0.5)
+    placeDropLine()
+    dropLine:Show()
+    managerInner:SetScript("OnUpdate", placeDropLine)
+end
+
+local function stopDrag(row)
+    if dragRow ~= row then return end
+    local slot = dropSlot()
+    dragRow = nil
+    row:SetAlpha(1)
+    dropLine:Hide()
+    managerInner:SetScript("OnUpdate", nil)
+    local target = slot > row.index and slot - 1 or slot
+    if target == row.index then return end
+    local ok, err = LuckyLoadouts.Loadouts:Move(row.entry.id, target)
+    if not ok and err then setStatus(managerStatus, err, true) end
+end
+
 local function acquireManagerRow(index)
     local row = managerRows[index]
     if row then return row end
@@ -248,6 +292,11 @@ local function acquireManagerRow(index)
     row:SetPoint("TOPLEFT", 0, -(index - 1) * MANAGER_ROW_HEIGHT)
     row:SetPoint("TOPRIGHT")
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    row:RegisterForDrag("LeftButton")
+    -- Guards against OnClick on release after a drag, so a drop never switches loadouts.
+    row:SetScript("OnMouseDown", function() row.dragged = false end)
+    row:SetScript("OnDragStart", startDrag)
+    row:SetScript("OnDragStop", stopDrag)
     local hover = row:CreateTexture(nil, "HIGHLIGHT")
     hover:SetAllPoints()
     hover:SetColorTexture(1, 1, 1, 0.06)
@@ -603,6 +652,7 @@ function SettingsUI:RefreshManager()
     for index, entry in ipairs(list) do
         local rowEntry = entry
         local row = acquireManagerRow(index)
+        row.entry, row.index, row.count = rowEntry, index, #list
         row:Show()
         row.name:SetText(rowEntry.name)
         row.highlight:SetShown(not quickDeleteMode and rowEntry.selected)
@@ -616,7 +666,7 @@ function SettingsUI:RefreshManager()
         local labels = situations[rowEntry.id]
         row.state:SetText(labels and table.concat(labels, ", ") or S.NO_SITUATION)
         row:SetScript("OnClick", function(_, button)
-            if quickDeleteMode then return end
+            if quickDeleteMode or row.dragged then return end
             if button == "RightButton" then
                 showRowMenu(row, rowEntry)
             elseif not blocker then

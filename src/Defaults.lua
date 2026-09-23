@@ -33,10 +33,11 @@ function LuckyLoadouts.GetSpecAssignments(characterDB, specID)
     characterDB.bySpec = type(characterDB.bySpec) == "table" and characterDB.bySpec or {}
     local data = characterDB.bySpec[specID]
     if type(data) ~= "table" then
-        data = { categories = {}, instances = {} }
+        data = { categories = {}, instances = {}, order = {} }
         characterDB.bySpec[specID] = data
     end
     data.categories = type(data.categories) == "table" and data.categories or {}
     data.instances = type(data.instances) == "table" and data.instances or {}
+    data.order = type(data.order) == "table" and data.order or {}
     return data
 end

@@ -16,7 +16,7 @@ local function initialize()
 
     local S = LuckyLoadouts.Strings
     LuckyLoadouts.Log = LuckyLog:New(S.PREFIX, function() return LuckyLoadoutsDB.devMode end)
-    LuckyLoadouts.Loadouts:Init()
+    LuckyLoadouts.Loadouts:Init(LuckyLoadoutsCharDB)
 
     local function openFromMinimap(_, button)
         if button == "RightButton" then

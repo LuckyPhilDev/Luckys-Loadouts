@@ -129,8 +129,8 @@ LuckyLoadouts.Settings = {
     SetReminderCombat = function() end,
 }
 
-LuckyLoadouts.Loadouts:Init()
 local characterDB = LuckyLoadouts.CopyDefaults({}, LuckyLoadouts.Defaults.character)
+LuckyLoadouts.Loadouts:Init(characterDB)
 LuckyLoadouts.Reminders:Init(characterDB)
 
 local missingSpecWrites = {
@@ -146,6 +146,13 @@ end
 
 local list, err, byID = LuckyLoadouts.Loadouts:Read(101)
 check(err == nil and #list == 2 and byID[1].selected, "production loadout read keeps selected identity")
+
+check(LuckyLoadouts.Loadouts:Move(1, 2), "dropping a loadout lower succeeds")
+local moved = LuckyLoadouts.Loadouts:Read(101)
+check(moved[1].id == 2 and moved[2].id == 1, "moved loadout keeps its new position")
+check(not LuckyLoadouts.Loadouts:Move(1, 3), "a loadout cannot drop past the end of the list")
+check(LuckyLoadouts.Loadouts:Move(1, 1) and LuckyLoadouts.Loadouts:Read(101)[1].id == 1,
+    "dropping a loadout back on top restores the order")
 
 local assignments = LuckyLoadouts.GetSpecAssignments(characterDB, 101)
 assignments.categories.Dungeon = 1
