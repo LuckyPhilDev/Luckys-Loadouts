@@ -163,17 +163,74 @@ function Reminders.ResolveAssignment(assignments, snapshot, loadoutsByID)
     }
 end
 
+-- The wanted talents isTaken reports missing, one line per dungeon or next boss,
+-- each with every talent wanted there so a swap never gives one up.
+-- isTaken returns nil for a talent the tree no longer has, which is skipped.
+function Reminders.ResolveTalents(assignments, snapshot, isTaken)
+    if type(assignments) ~= "table" or type(snapshot) ~= "table" then return nil end
+    local sources = {}
+    if snapshot.category == "Dungeon" then
+        sources[1] = { label = snapshot.label, list = assignments.talents and assignments.talents[snapshot.instanceID] }
+    elseif snapshot.category == "Raid" then
+        for _, boss in ipairs(snapshot.bosses or {}) do
+            sources[#sources + 1] = { label = boss.name,
+                list = assignments.bossTalents and assignments.bossTalents[boss.encounterID] }
+        end
+    end
+    local lines = {}
+    for _, source in ipairs(sources) do
+        local missing = {}
+        for _, talent in ipairs(type(source.list) == "table" and source.list or {}) do
+            if isTaken(talent) == false then missing[#missing + 1] = talent end
+        end
+        if #missing > 0 then lines[#lines + 1] = { label = source.label, talents = missing, wanted = source.list } end
+    end
+    return #lines > 0 and lines or nil
+end
+
+local function talentContent(lines)
+    local parts = {}
+    for _, line in ipairs(lines) do
+        for _, talent in ipairs(line.talents) do parts[#parts + 1] = line.label .. "=" .. tostring(talent.nodeID) end
+    end
+    return table.concat(parts, ",")
+end
+
 function Reminders.CreateController(callbacks)
     local state = {
         callbacks = callbacks,
         revisions = {},
+        shown = {},
         generation = 0,
         retries = 0,
     }
 
     function state:Hide()
         self.visible = nil
+        self.visibleKey = nil
         self.callbacks.hide()
+    end
+
+    -- The loadout comes first; talents only once it is right or dismissed, so
+    -- they are checked against the tree the player will actually play.
+    function state:NextStep(snapshot, specID)
+        local assignments = self.callbacks.getAssignments(specID)
+        local revision = self.revisions[specID] or 0
+        local function unseen(identity) return identity == self.visibleKey or not self.shown[identity] end
+
+        local byID, selectedID = self.callbacks.getLoadouts(specID)
+        local match = Reminders.ResolveAssignment(assignments, snapshot, byID)
+        if match and match.valid == true and not Reminders.Offers(match, selectedID) then
+            local identity = table.concat({ snapshot.key, specID, match.source, match.configID, revision }, ":")
+            if unseen(identity) then return match, identity, identity end
+        end
+
+        local lines = self.callbacks.isTaken and Reminders.ResolveTalents(assignments, snapshot, self.callbacks.isTaken)
+        if lines then
+            local identity = table.concat({ snapshot.key, specID, "talents", revision }, ":")
+            if unseen(identity) then return { talents = lines }, identity, identity .. ":" .. talentContent(lines) end
+        end
+        return nil
     end
 
     function state:Evaluate(snapshot)
@@ -184,23 +241,19 @@ function Reminders.CreateController(callbacks)
         self.latestSnapshot = snapshot
         if self.visitKey ~= snapshot.key then
             self.visitKey = snapshot.key
-            self.shownKey = nil
+            self.shown = {}
         end
 
         local specID = self.callbacks.getSpec()
         if not specID then self:Hide(); return end
-        local assignments = self.callbacks.getAssignments(specID)
-        local byID, selectedID = self.callbacks.getLoadouts(specID)
-        local match = Reminders.ResolveAssignment(assignments, snapshot, byID)
-        if not match or match.valid ~= true or Reminders.Offers(match, selectedID) then
+        local match, identity, content = self:NextStep(snapshot, specID)
+        if not match then
             self.deferred = nil
             self:Hide()
             return
         end
 
-        local revision = self.revisions[specID] or 0
-        local identity = table.concat({ snapshot.key, specID, match.source, match.configID, revision }, ":")
-        if self.shownKey == identity then return end
+        if self.visibleKey == identity and self.visibleContent == content then return end
         if self.callbacks.inCombat() then
             self.deferred = identity
             self:Hide()
@@ -208,24 +261,29 @@ function Reminders.CreateController(callbacks)
         end
 
         self.deferred = nil
-        self.shownKey = identity
+        self.shown[identity] = true
+        self.visibleKey, self.visibleContent = identity, content
         self.visible = match
         self.callbacks.show(match, snapshot)
     end
 
+    -- Dismissing the loadout moves on to any talents still missing.
     function state:Dismiss()
         self:Hide()
+        if self.latestSnapshot then self:Evaluate(self.latestSnapshot) end
     end
 
     -- Dev: show again what a dismissal suppressed for this visit.
     function state:Replay()
-        self.shownKey = nil
+        self.shown = {}
         self:Evaluate(self.callbacks.snapshot())
         return self.visible
     end
 
+    -- The new loadout may still lack a wanted talent, so look again.
     function state:Switched(request)
         if not self.visible or not request or Reminders.Offers(self.visible, request.id) then self:Hide() end
+        self:ScheduleRefresh(false)
     end
 
     function state:AssignmentChanged(specID)
@@ -279,6 +337,7 @@ function Reminders:Init(db)
         getSpec = function() return LuckyLoadouts.Loadouts:GetCurrentSpec() end,
         getAssignments = function(specID) return LuckyLoadouts.GetSpecAssignments(characterDB, specID) end,
         getLoadouts = readLoadouts,
+        isTaken = LuckyLoadouts.Talents.IsTaken,
         inCombat = InCombatLockdown,
         snapshot = function()
             local snapshot = Reminders.ClassifyContent()
@@ -394,6 +453,22 @@ function Reminders:SetInstanceAssignment(specID, instance, boss, configID)
     if entry.configID == nil and not next(entry.bosses or {}) then data.instances[instance.id] = nil end
     self:AssignmentChanged(specID)
     return true
+end
+
+-- The talents wanted in a dungeon, or at a raid boss when one is given.
+-- ponytail: emptied lists are kept, they resolve to nothing.
+function Reminders:TalentList(specID, instance, boss)
+    local data = LuckyLoadouts.GetSpecAssignments(characterDB, specID)
+    if not data then return nil end
+    local map, key = data.talents, instance.id
+    if boss then map, key = data.bossTalents, boss.encounterID end
+    map[key] = type(map[key]) == "table" and map[key] or {}
+    return map[key]
+end
+
+function Reminders:GiveUpList(specID)
+    local data = LuckyLoadouts.GetSpecAssignments(characterDB, specID)
+    return data and data.giveUp or {}
 end
 
 function Reminders:SetInstance(specID, instanceID, configID)

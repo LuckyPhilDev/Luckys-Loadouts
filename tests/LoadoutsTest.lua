@@ -44,7 +44,10 @@ local configInfo = {
 }
 local createdNames = {}
 
-Enum = { LoadConfigResult = { Error = 0, NoChangesNecessary = 1, LoadInProgress = 2, Ready = 3 } }
+Enum = {
+    LoadConfigResult = { Error = 0, NoChangesNecessary = 1, LoadInProgress = 2, Ready = 3 },
+    TraitEdgeType = { VisualOnly = 0, SufficientForAvailability = 2, RequiredForAvailability = 3 },
+}
 C_Timer = { After = function(delay, fn) timers[#timers + 1] = { delay = delay, fn = fn } end }
 C_ClassTalents = {
     GetConfigIDsBySpecID = function(specID) return configsBySpec[specID] end,
@@ -125,6 +128,7 @@ dofile(root .. "src/Defaults.lua")
 dofile(root .. "src/Journal.lua")
 dofile(root .. "src/Loadouts.lua")
 dofile(root .. "src/Reminders.lua")
+dofile(root .. "src/Talents.lua")
 
 LuckyLoadouts.Settings = {
     ShowReminder = function() end,
@@ -134,6 +138,7 @@ LuckyLoadouts.Settings = {
 
 local characterDB = LuckyLoadouts.CopyDefaults({}, LuckyLoadouts.Defaults.character)
 LuckyLoadouts.Loadouts:Init(characterDB)
+LuckyLoadouts.Talents:Init()
 LuckyLoadouts.Reminders:Init(characterDB)
 
 local missingSpecWrites = {
@@ -577,5 +582,170 @@ LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, nil, nil)
 LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[2], nil)
 LuckyLoadouts.Reminders:SetInstanceAssignment(101, voidspire, VOIDSPIRE_BOSSES[3], nil)
 check(raidData.instances[2900] == nil, "clearing every assignment drops the instance entry")
+
+
+-- Talent reminders. Class pool 1: 10 Soothe (unbought), 20 Roar, 40 Typhoon (two ranks),
+-- 60 Cyclone (unbought), 70 a talent others depend on. Spec pool 2: 30 a choice node, 50 a spec talent.
+local nodes = {
+    [10] = { ID = 10, activeRank = 0, ranksPurchased = 0, maxRanks = 1, entryIDs = { 101 }, pool = 1 },
+    [20] = { ID = 20, activeRank = 1, ranksPurchased = 1, maxRanks = 1, entryIDs = { 201 }, pool = 1,
+        activeEntry = { entryID = 201 } },
+    [30] = { ID = 30, activeRank = 1, ranksPurchased = 1, maxRanks = 1, entryIDs = { 301, 302 }, pool = 2,
+        activeEntry = { entryID = 301 } },
+    [40] = { ID = 40, activeRank = 2, ranksPurchased = 2, maxRanks = 2, entryIDs = { 401 }, pool = 1,
+        activeEntry = { entryID = 401 } },
+    [50] = { ID = 50, activeRank = 1, ranksPurchased = 1, maxRanks = 1, entryIDs = { 501 }, pool = 2,
+        activeEntry = { entryID = 501 } },
+    [60] = { ID = 60, activeRank = 0, ranksPurchased = 0, maxRanks = 1, entryIDs = { 601 }, pool = 1 },
+    [70] = { ID = 70, activeRank = 1, ranksPurchased = 1, maxRanks = 1, entryIDs = { 701 }, pool = 1,
+        activeEntry = { entryID = 701 }, canRefundRank = false },
+    [80] = { ID = 80, activeRank = 1, ranksPurchased = 1, maxRanks = 1, entryIDs = { 801 }, pool = 1,
+        activeEntry = { entryID = 801 }, maxed = true },
+}
+local talentCalls = {}
+local refundAllowed = true
+C_Traits.GetNodeInfo = function(_, nodeID) return nodes[nodeID] or { ID = 0 } end
+C_Traits.GetNodeCost = function(_, nodeID)
+    if nodes[nodeID].maxed then return {} end
+    return { { ID = nodes[nodeID].pool, amount = 1 } }
+end
+C_Traits.RefundRank = function(_, nodeID)
+    talentCalls[#talentCalls + 1] = "refund:" .. nodeID
+    return refundAllowed
+end
+C_Traits.PurchaseRank = function(_, nodeID)
+    talentCalls[#talentCalls + 1] = "purchase:" .. nodeID
+    return true
+end
+C_Traits.SetSelection = function(_, nodeID, entryID)
+    talentCalls[#talentCalls + 1] = "select:" .. nodeID .. ":" .. entryID
+    return true
+end
+
+local Talents = LuckyLoadouts.Talents
+local function talent(nodeID, entryID, choice) return { nodeID = nodeID, entryID = entryID, choice = choice } end
+local soothe, roar, otherSide = talent(10, 101), talent(20, 201), talent(30, 302, true)
+local typhoon, specTalent, cyclone, anchored = talent(40, 401), talent(50, 501), talent(60, 601), talent(70, 701)
+local gone = talent(99, 999)
+check(Talents.IsTaken(soothe) == false and Talents.IsTaken(roar) == true
+        and Talents.IsTaken(otherSide) == false and Talents.IsTaken(gone) == nil,
+    "a talent is taken only at rank, on its own side of a choice node, and unknown once removed")
+
+local talentData = LuckyLoadouts.GetSpecAssignments({}, 101)
+talentData.talents[42] = { soothe, gone }
+local dungeonSnapshot = { category = "Dungeon", instanceID = 42, label = "Den", key = "Dungeon:42" }
+local lines = LuckyLoadouts.Reminders.ResolveTalents(talentData, dungeonSnapshot, Talents.IsTaken)
+check(lines and #lines == 1 and lines[1].label == "Den" and #lines[1].talents == 1 and lines[1].talents[1] == soothe
+        and lines[1].wanted == talentData.talents[42],
+    "a dungeon lists its missing talents, skipping any the tree no longer has")
+talentData.bossTalents[2734] = { otherSide }
+talentData.bossTalents[2736] = { roar }
+lines = LuckyLoadouts.Reminders.ResolveTalents(talentData, raidSnapshot, Talents.IsTaken)
+check(lines and #lines == 1 and lines[1].label == "Vorasius",
+    "a raid lists only the next bosses still missing a talent")
+
+-- The loadout step comes first, then the talents, and taking them clears the reminder.
+local talentShown = {}
+local talentController = LuckyLoadouts.Reminders.CreateController({
+    getSpec = function() return 101 end,
+    getAssignments = function() return { categories = { Dungeon = 2 }, instances = {}, talents = talentData.talents } end,
+    getLoadouts = function() return byID, 1 end,
+    isTaken = Talents.IsTaken,
+    inCombat = function() return false end,
+    snapshot = function() return dungeonSnapshot end,
+    show = function(value) talentShown[#talentShown + 1] = value end,
+    hide = function() end,
+    combatChanged = function() end,
+    after = C_Timer.After,
+})
+talentController:Evaluate(dungeonSnapshot)
+check(#talentShown == 1 and talentShown[1].configID == 2, "the loadout reminder shows before talents")
+talentController:Dismiss()
+check(#talentShown == 2 and talentShown[2].talents, "dismissing the loadout moves on to the talents")
+talentController:Evaluate(dungeonSnapshot)
+check(#talentShown == 2, "an unchanged talent reminder is not shown again")
+nodes[10].activeRank = 1
+talentController:Evaluate(dungeonSnapshot)
+check(talentController.visible == nil, "taking every wanted talent clears the reminder")
+nodes[10].activeRank = 0
+talentController:Evaluate(dungeonSnapshot)
+check(#talentShown == 2, "a dismissed or cleared talent reminder stays away for the visit")
+
+-- Planning a swap from the give-up priority list.
+local function ids(talents)
+    local out = {}
+    for index, value in ipairs(talents) do out[index] = value.nodeID end
+    return table.concat(out, ",")
+end
+local plan = Talents.PlanSwap({ soothe }, { cyclone, anchored, specTalent, roar, typhoon })
+check(ids(plan.take) == "10" and ids(plan.giveUp) == "20" and #plan.blocked == 0,
+    "the first talent in priority order that is taken, free to remove and from the same pool is given up")
+plan = Talents.PlanSwap({ soothe }, { talent(80, 801) })
+check(ids(plan.giveUp) == "80", "a maxed talent reporting no cost can still be given up")
+plan = Talents.PlanSwap({ soothe }, { roar, typhoon }, { roar })
+check(ids(plan.giveUp) == "40", "a talent wanted here is never given up")
+plan = Talents.PlanSwap({ soothe, cyclone }, { roar })
+check(ids(plan.take) == "10" and ids(plan.blocked) == "60",
+    "a talent left without room is reported instead of swapped")
+plan = Talents.PlanSwap({ soothe, cyclone }, { typhoon })
+check(ids(plan.take) == "10,60" and ids(plan.giveUp) == "40", "a two-rank talent makes room for two")
+plan = Talents.PlanSwap({ otherSide }, {})
+check(ids(plan.take) == "30" and #plan.giveUp == 0, "a choice node already bought changes sides for free")
+plan = Talents.PlanSwap({ soothe }, {})
+check(#plan.take == 0 and ids(plan.blocked) == "10", "with nothing to give up the swap cannot happen")
+
+-- Dependencies: every node lists its children in visibleEdges.
+local SUFFICIENT = Enum.TraitEdgeType.SufficientForAvailability
+local function edges(parentID, ...)
+    local list = {}
+    for _, child in ipairs({ ... }) do list[#list + 1] = { targetNode = child, type = SUFFICIENT } end
+    nodes[parentID].visibleEdges = list
+end
+configInfo[activeConfigID] = { treeIDs = { 1 } }
+C_Traits.GetEntryInfo = function() return {} end
+C_Traits.GetTreeNodes = function() return { 10, 20, 30, 40, 50, 60, 70, 80 } end
+edges(20, 10)
+plan = Talents.PlanSwap({ soothe }, { roar, typhoon })
+check(ids(plan.take) == "10" and ids(plan.giveUp) == "40", "a talent the wanted one needs is never given up for it")
+edges(20, 80)
+edges(40, 80)
+plan = Talents.PlanSwap({ soothe, cyclone }, { roar, typhoon })
+check(ids(plan.take) == "10" and ids(plan.giveUp) == "20" and ids(plan.blocked) == "60",
+    "a talent can go while another parent still reaches what is below, but not the last one")
+edges(20)
+edges(40, 60)
+plan = Talents.PlanSwap({ soothe, cyclone }, { typhoon })
+check(ids(plan.take) == "10" and ids(plan.locked) == "60", "a talent whose parent the swap gives up is locked")
+for _, node in pairs(nodes) do node.visibleEdges = nil end
+configInfo[activeConfigID] = nil
+
+-- Swapping.
+staged, canEdit, inCombat, commitShouldSucceed = false, true, false, true
+local commitsBefore, rollbacksBefore = commitCount, rollbackCount
+check(Talents.Swap({ soothe, otherSide }, { roar })
+        and table.concat(talentCalls, ",") == "refund:20,purchase:10,select:30:302"
+        and commitCount == commitsBefore + 1,
+    "a swap gives up what the plan says, takes every talent it can and applies once")
+check(Talents.GetBlocker() == LuckyLoadouts.Strings.SWAP_PENDING and not Talents.Swap({ soothe }, { roar }),
+    "a second swap waits for the first to land")
+Talents:HandleEvent("TRAIT_CONFIG_UPDATED", activeConfigID)
+check(Talents.GetBlocker() == nil, "the swap ends when the active talents update")
+
+talentCalls, refundAllowed = {}, false
+commitsBefore = commitCount
+local refused, refusedErr = Talents.Swap({ soothe }, { roar })
+check(not refused and refusedErr and commitCount == commitsBefore and rollbackCount == rollbacksBefore + 1
+        and #talentCalls == 1,
+    "a refused refund rolls back and applies nothing")
+refundAllowed = true
+
+talentCalls = {}
+check(not Talents.Swap({ soothe }, { cyclone }) and #talentCalls == 0, "a swap with no room changes nothing")
+
+local swapFailure
+check(Talents.Swap({ soothe }, { roar }, nil, function(message) swapFailure = message end), "a swap starts")
+Talents:HandleEvent("CONFIG_COMMIT_FAILED")
+check(swapFailure == LuckyLoadouts.Strings.SWAP_FAILED and Talents.GetBlocker() == nil,
+    "an interrupted swap reports and can be tried again")
 
 print(string.format("LoadoutsTest: %d/%d assertions passed", passed, tests))

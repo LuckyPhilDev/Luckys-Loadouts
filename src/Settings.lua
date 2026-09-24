@@ -31,6 +31,7 @@ local renameTarget
 local assignDialog
 local assignStatus
 local assignCategoryRows = {}
+local giveUpRow
 local reminder
 local reminderText
 local reminderStatus
@@ -39,6 +40,11 @@ local reminderApply
 local reminderMatch
 local reminderChoices
 local reminderChoiceRows = {}
+local reminderRowCount = 0
+-- What the reminder's main button does and what blocks it, per step.
+local reminderAction
+local reminderSwitchBlocker = function() return nil end
+local reminderNote
 local settingsPanel
 local minimapButton
 local showRename
@@ -414,12 +420,18 @@ local CATEGORY_ROWS_TOP = 21
 local CATEGORY_ORDER = { "Raid", "Dungeon", "Delve", "OpenWorld", "Battleground", "Arena" }
 local SECTION_GAP = 12
 local HEADER_TO_CONTENT = 16
-local DUNGEON_HEADER_TOP = CATEGORY_ROWS_TOP + #CATEGORY_ORDER * ASSIGN_ROW_HEIGHT + SECTION_GAP
+local GIVE_UP_HEADER_TOP = CATEGORY_ROWS_TOP + #CATEGORY_ORDER * ASSIGN_ROW_HEIGHT + SECTION_GAP
+local GIVE_UP_ROW_TOP = GIVE_UP_HEADER_TOP + HEADER_TO_CONTENT
+local GIVE_UP_ICON_SIZE = 20
+local GIVE_UP_ICON_GAP = 4
+local DUNGEON_HEADER_TOP = GIVE_UP_ROW_TOP + ASSIGN_ROW_HEIGHT + SECTION_GAP
 local TILES_TOP = DUNGEON_HEADER_TOP + HEADER_TO_CONTENT
 local TILES_PER_ROW = 4
 local TILE_GAP = 8
 local TILE_WIDTH = (ASSIGN_CONTENT_WIDTH - DIALOG_PAD * 2 - TILE_GAP * (TILES_PER_ROW - 1)) / TILES_PER_ROW
 local TILE_HEIGHT = 58
+local TILE_ICON_SIZE = 16
+local TILE_ICONS_MAX = 4
 -- The Adventure Guide draws only this corner of its instance art.
 local EJ_ART_COORDS = { 0, 0.68359375, 0, 0.7421875 }
 -- A boss portrait is 2:1, a little wider than a tile, so its sides are trimmed.
@@ -472,6 +484,33 @@ local function createAssignRow(top, height)
     return row
 end
 
+local function talentText(talent)
+    local Talents = LuckyLoadouts.Talents
+    return "|T" .. (Talents.Icon(talent) or 134400) .. ":16|t " .. Talents.SpellName(talent)
+end
+
+local function talentNames(talents)
+    local names = {}
+    for index, talent in ipairs(talents) do names[index] = LuckyLoadouts.Talents.SpellName(talent) end
+    return table.concat(names, ", ")
+end
+
+-- The Assign window covers the talent tree, so it steps aside while picking.
+local function pickTalents(mode, title, getList)
+    local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
+    if not specID then return end
+    assignDialog:Hide()
+    LuckyLoadouts.Talents.StartPick(mode, title,
+        function() return getList(specID) end,
+        function() LuckyLoadouts.Reminders:AssignmentChanged(specID) end,
+        function()
+            -- Closing the Talents window also ends picking; wait to see if it did.
+            C_Timer.After(0, function()
+                if manager:IsVisible() then showAssignments() end
+            end)
+        end)
+end
+
 local function showTilePicker(tile)
     local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
     local list = LuckyLoadouts.Loadouts:Read(specID)
@@ -483,16 +522,35 @@ local function showTilePicker(tile)
         end
         rootDescription:CreateDivider()
         rootDescription:CreateButton(S.CLEAR, function() tile.assign(specID, nil) end)
+        rootDescription:CreateDivider()
+        rootDescription:CreateButton(S.TALENT_REMINDERS, function() pickTalents("take", tile.title, tile.talentList) end)
     end)
 end
 
 local function showTileTooltip(tile)
     GameTooltip:SetOwner(tile, "ANCHOR_TOP")
     GameTooltip:SetText(tile.title)
+    for _, talent in ipairs(tile.talents or {}) do GameTooltip:AddLine(talentText(talent), 1, 1, 1) end
     GameTooltip:Show()
 end
 
--- The owner sets tile.title and tile.assign(specID, loadout), a nil loadout clearing.
+local function placeTileIcons(tile, talents)
+    local shown = 0
+    for _, talent in ipairs(talents or {}) do
+        if shown == TILE_ICONS_MAX then break end
+        shown = shown + 1
+        local icon = tile.icons[shown] or tile:CreateTexture(nil, "OVERLAY")
+        tile.icons[shown] = icon
+        icon:SetSize(TILE_ICON_SIZE, TILE_ICON_SIZE)
+        icon:SetPoint("TOPRIGHT", -3 - (shown - 1) * (TILE_ICON_SIZE + 2), -3)
+        icon:SetTexture(LuckyLoadouts.Talents.Icon(talent) or 134400)
+        icon:Show()
+    end
+    for index = shown + 1, #tile.icons do tile.icons[index]:Hide() end
+end
+
+-- The owner sets tile.title, tile.talentList(specID) and tile.assign(specID, loadout),
+-- a nil loadout clearing.
 local function createTile()
     local tile = CreateFrame("Button", nil, assignContent, "BackdropTemplate")
     tile:SetSize(TILE_WIDTH, TILE_HEIGHT)
@@ -520,6 +578,7 @@ local function createTile()
     tile.name:SetPoint("BOTTOMRIGHT", tile.loadout, "TOPRIGHT", 0, 2)
     tile.name:SetJustifyH("LEFT")
     tile.name:SetWordWrap(false)
+    tile.icons = {}
     local hover = tile:CreateTexture(nil, "HIGHLIGHT")
     hover:SetAllPoints(tile.art)
     hover:SetColorTexture(1, 1, 1, 0.1)
@@ -528,6 +587,75 @@ local function createTile()
     tile:SetScript("OnEnter", showTileTooltip)
     tile:SetScript("OnLeave", GameTooltip_Hide)
     return tile
+end
+
+local giveUpDrag
+
+-- The gap between give-up icons the cursor is nearest, 1 being before the first.
+local function giveUpSlot()
+    local offset = GetCursorPosition() / giveUpRow:GetEffectiveScale() - giveUpRow:GetLeft()
+    local slot = math.floor(offset / (GIVE_UP_ICON_SIZE + GIVE_UP_ICON_GAP) + 0.5) + 1
+    return math.max(1, math.min(slot, #giveUpRow.talents + 1))
+end
+
+local function placeGiveUpDropLine()
+    local x = (giveUpSlot() - 1) * (GIVE_UP_ICON_SIZE + GIVE_UP_ICON_GAP) - GIVE_UP_ICON_GAP / 2 - 1
+    giveUpRow.dropLine:SetPoint("LEFT", x, 0)
+end
+
+local function startGiveUpDrag(icon)
+    giveUpDrag = icon
+    icon:SetAlpha(0.5)
+    GameTooltip_Hide()
+    placeGiveUpDropLine()
+    giveUpRow.dropLine:Show()
+    giveUpRow:SetScript("OnUpdate", placeGiveUpDropLine)
+end
+
+local function stopGiveUpDrag(icon)
+    if giveUpDrag ~= icon then return end
+    local slot = giveUpSlot()
+    giveUpDrag = nil
+    icon:SetAlpha(1)
+    giveUpRow.dropLine:Hide()
+    giveUpRow:SetScript("OnUpdate", nil)
+    local target = slot > icon.index and slot - 1 or slot
+    if target == icon.index then return end
+    local list = giveUpRow.talents
+    table.insert(list, target, table.remove(list, icon.index))
+    LuckyLoadouts.Reminders:AssignmentChanged(LuckyLoadouts.Loadouts:GetCurrentSpec())
+    SettingsUI:RefreshAssignments()
+end
+
+local function showGiveUpTooltip(icon)
+    if giveUpDrag then return end
+    local talent = giveUpRow.talents[icon.index]
+    GameTooltip:SetOwner(icon, "ANCHOR_TOP")
+    if talent.spellID then
+        GameTooltip:SetSpellByID(talent.spellID)
+    else
+        GameTooltip:SetText(LuckyLoadouts.Talents.SpellName(talent))
+    end
+    GameTooltip:AddLine(string.format(S.GIVE_UP_PRIORITY, icon.index), C.goldPrimary[1], C.goldPrimary[2], C.goldPrimary[3])
+    GameTooltip:Show()
+end
+
+local function acquireGiveUpIcon(index)
+    local icon = giveUpRow.icons[index]
+    if icon then return icon end
+    icon = CreateFrame("Button", nil, giveUpRow)
+    icon:SetSize(GIVE_UP_ICON_SIZE, GIVE_UP_ICON_SIZE)
+    icon:SetPoint("LEFT", (index - 1) * (GIVE_UP_ICON_SIZE + GIVE_UP_ICON_GAP), 0)
+    icon.texture = icon:CreateTexture(nil, "ARTWORK")
+    icon.texture:SetAllPoints()
+    icon.index = index
+    icon:RegisterForDrag("LeftButton")
+    icon:SetScript("OnDragStart", startGiveUpDrag)
+    icon:SetScript("OnDragStop", stopGiveUpDrag)
+    icon:SetScript("OnEnter", showGiveUpTooltip)
+    icon:SetScript("OnLeave", GameTooltip_Hide)
+    giveUpRow.icons[index] = icon
+    return icon
 end
 
 local function sectionHeight(count)
@@ -563,6 +691,26 @@ local function createAssignmentDialog()
         end
         assignCategoryRows[category] = row
     end
+
+    makeSectionHeader(S.GIVE_UP_HEADER, GIVE_UP_HEADER_TOP)
+    giveUpRow = CreateFrame("Frame", nil, assignContent)
+    giveUpRow:SetHeight(ASSIGN_ROW_HEIGHT)
+    giveUpRow:SetPoint("TOPLEFT", 16, -GIVE_UP_ROW_TOP)
+    giveUpRow:SetPoint("TOPRIGHT", -16, -GIVE_UP_ROW_TOP)
+    giveUpRow.icons = {}
+    giveUpRow.edit = makeIconButton(giveUpRow, "square-pen", S.EDIT, 16)
+    giveUpRow.edit:SetPoint("RIGHT")
+    giveUpRow.edit:SetScript("OnClick", function()
+        pickTalents("giveUp", nil, function(specID) return LuckyLoadouts.Reminders:GiveUpList(specID) end)
+    end)
+    giveUpRow.empty = makeText(giveUpRow, 11, C.textMuted)
+    giveUpRow.empty:SetPoint("LEFT")
+    giveUpRow.empty:SetText(S.GIVE_UP_EMPTY)
+    giveUpRow.dropLine = giveUpRow:CreateTexture(nil, "OVERLAY")
+    giveUpRow.dropLine:SetSize(2, GIVE_UP_ICON_SIZE + 6)
+    giveUpRow.dropLine:SetColorTexture(C.goldPrimary[1], C.goldPrimary[2], C.goldPrimary[3], 1)
+    giveUpRow.dropLine:Hide()
+
     makeSectionHeader(S.DUNGEONS_HEADER, DUNGEON_HEADER_TOP)
 
     assignDialog:ClearAllPoints()
@@ -608,7 +756,7 @@ local function refreshSeason(data, byID)
     end)
 
     local used = 0
-    local function placeTile(top, slot, art, portrait, title, configID, assign)
+    local function placeTile(top, slot, art, portrait, title, configID, assign, talents, talentList)
         used = used + 1
         local tile = tiles[used] or createTile()
         tiles[used] = tile
@@ -622,7 +770,8 @@ local function refreshSeason(data, byID)
         tile.loadout:SetText(configID and assignedName(configID, byID) or "")
         local border = configID and C.goldAccent or C.borderDark
         tile:SetBackdropBorderColor(border[1], border[2], border[3])
-        tile.title, tile.assign = title, assign
+        tile.title, tile.assign, tile.talents, tile.talentList = title, assign, talents, talentList
+        placeTileIcons(tile, talents)
         tile:Show()
     end
 
@@ -633,7 +782,9 @@ local function refreshSeason(data, byID)
             function(specID, loadout)
                 LuckyLoadouts.Reminders:SetInstanceAssignment(specID, instance, nil, loadout and loadout.id)
                 reportAssignment(loadout, instance.label)
-            end)
+            end,
+            data.talents[instance.id],
+            function(specID) return LuckyLoadouts.Reminders:TalentList(specID, instance) end)
     end
     local top = TILES_TOP + sectionHeight(#dungeons)
 
@@ -655,7 +806,9 @@ local function refreshSeason(data, byID)
                 function(specID, loadout)
                     LuckyLoadouts.Reminders:SetInstanceAssignment(specID, raid, boss, loadout and loadout.id)
                     reportAssignment(loadout, boss.name)
-                end)
+                end,
+                data.bossTalents[boss.encounterID],
+                function(specID) return LuckyLoadouts.Reminders:TalentList(specID, raid, boss) end)
         end
         top = top + sectionHeight(#bosses)
     end
@@ -664,7 +817,7 @@ local function refreshSeason(data, byID)
     fitAssignments(top + DIALOG_PAD)
 end
 
-local REMINDER_WIDTH = 380
+local REMINDER_WIDTH = 420
 local REMINDER_TEXT_TOP = CONTENT_TOP
 local REMINDER_LINE_GAP = 6
 local REMINDER_CHOICE_HEIGHT = 28
@@ -696,20 +849,21 @@ local function reminderChoiceRow(index)
     return row
 end
 
--- Each Switch button on the reminder with the loadout it switches to.
+-- Each button on the reminder with what would block it.
 local function reminderSwitches()
-    local choices = reminderMatch and reminderMatch.choices
-    if not choices then return { { button = reminderSwitch, configID = reminderMatch and reminderMatch.configID } } end
+    if not reminderMatch then return {} end
+    if reminderRowCount == 0 then return { { button = reminderSwitch, blocker = reminderSwitchBlocker } } end
     local switches = {}
-    for index, choice in ipairs(choices) do
-        switches[index] = { button = reminderChoiceRows[index].switch, configID = choice.configID }
+    for index = 1, reminderRowCount do
+        local row = reminderChoiceRows[index]
+        switches[index] = { button = row.switch, blocker = row.blocker }
     end
     return switches
 end
 
 local function updateReminderSwitches(blocker)
     for _, switch in ipairs(reminderSwitches()) do
-        switch.button:SetEnabled(not (blocker or LuckyLoadouts.Loadouts:GetSwitchBlocker(switch.configID)))
+        switch.button:SetEnabled(not (blocker or switch.blocker()))
     end
 end
 
@@ -721,6 +875,12 @@ end
 local function setReminderStatus(message, errorState)
     setStatus(reminderStatus, message, errorState)
     fitReminder()
+end
+
+-- A blocker when there is one, otherwise the step's own note.
+local function showReminderBlocker(blocker)
+    blocker = blocker or reminderSwitchBlocker()
+    setReminderStatus(blocker or reminderNote or "", blocker ~= nil)
 end
 
 local function createReminder()
@@ -747,7 +907,7 @@ local function createReminder()
     reminderApply:Hide()
     dismiss:SetScript("OnClick", function() LuckyLoadouts.Reminders:Dismiss() end)
     reminderSwitch:SetScript("OnClick", function()
-        if reminderMatch then LuckyLoadouts.Loadouts:RequestSwitch(reminderMatch.configID, "reminder") end
+        if reminderAction then reminderAction() end
     end)
     reminderApply:SetScript("OnClick", function()
         local ok, err = LuckyLoadouts.Loadouts:ApplyPending()
@@ -807,6 +967,7 @@ function SettingsUI:Init(accountDB, characterDB)
             managerApply:Hide()
             setReminderApplying(false)
         end
+        if kind == "refreshed" then SettingsUI:ReplanReminder() end
         if reminder:IsShown() and reminderMatch then
             updateReminderSwitches()
             if kind == "switchFailed" then
@@ -941,39 +1102,135 @@ function SettingsUI:RefreshAssignments()
     for category, row in pairs(assignCategoryRows) do
         row.picker:SetText(assignedName(data.categories[category], byID))
     end
+    giveUpRow.talents = data.giveUp
+    for index, talent in ipairs(data.giveUp) do
+        local icon = acquireGiveUpIcon(index)
+        icon.texture:SetTexture(LuckyLoadouts.Talents.Icon(talent) or 134400)
+        icon:Show()
+    end
+    for index = #data.giveUp + 1, #giveUpRow.icons do giveUpRow.icons[index]:Hide() end
+    giveUpRow.empty:SetShown(#data.giveUp == 0)
     refreshSeason(data, byID)
+end
+
+-- Each row is { text, button, onClick, blocker }.
+local function showReminderRows(rows)
+    for index, entry in ipairs(rows) do
+        local row = reminderChoiceRow(index)
+        row.text:SetText(entry.text)
+        row.switch:SetText(entry.button)
+        row.switch:SetScript("OnClick", entry.onClick)
+        row.blocker = entry.blocker
+        row:Show()
+    end
+    for index = #rows + 1, #reminderChoiceRows do reminderChoiceRows[index]:Hide() end
+    reminderRowCount = #rows
+    reminderChoices:SetHeight(#rows * REMINDER_CHOICE_HEIGHT)
+end
+
+local function noBlocker() return nil end
+
+local function swapFailed(message)
+    setReminderStatus(message, true)
+    updateReminderSwitches()
+end
+
+-- The talents on each line under key, one a pair of next bosses share listed once.
+local function lineTalents(lines, key)
+    local talents, seen = {}, {}
+    for _, line in ipairs(lines) do
+        for _, talent in ipairs(line[key]) do
+            if not seen[talent.nodeID] then
+                seen[talent.nodeID] = true
+                talents[#talents + 1] = talent
+            end
+        end
+    end
+    return talents
+end
+
+-- Plan the swap against the talents as they stand now: Swap when it can take
+-- anything, otherwise open the tree, and a note of what it gives up or cannot do.
+local function planTalentStep(explain)
+    local Talents = LuckyLoadouts.Talents
+    local missing = lineTalents(reminderMatch.talents, "talents")
+    local keep = lineTalents(reminderMatch.talents, "wanted")
+    local giveUps = LuckyLoadouts.Reminders:GiveUpList(LuckyLoadouts.Loadouts:GetCurrentSpec())
+    local plan = Talents.PlanSwap(missing, giveUps, keep, explain)
+    local canSwap = #plan.take > 0
+    reminderSwitch:SetText(canSwap and S.SWAP or S.OPEN_TALENTS)
+    reminderSwitchBlocker = canSwap and Talents.GetBlocker or noBlocker
+    reminderAction = function()
+        if not canSwap then
+            Talents.PointOut(missing)
+            return
+        end
+        local ok, err = Talents.Swap(missing, giveUps, keep, swapFailed)
+        setReminderStatus(ok and S.SWAP_PENDING or err, not ok)
+        updateReminderSwitches()
+    end
+    local notes = { #giveUps == 0 and S.SWAP_NO_LIST or nil }
+    if #plan.giveUp > 0 then notes[#notes + 1] = string.format(S.SWAP_GIVES_UP, talentNames(plan.giveUp)) end
+    if #plan.blocked > 0 and #giveUps > 0 then notes[#notes + 1] = string.format(S.SWAP_CANNOT, talentNames(plan.blocked)) end
+    if #plan.locked > 0 then notes[#notes + 1] = string.format(S.SWAP_LOCKED, talentNames(plan.locked)) end
+    reminderNote = table.concat(notes, " ")
+end
+
+local function talentLines(lines)
+    local labels, rows = {}, {}
+    for _, line in ipairs(lines) do labels[#labels + 1] = line.label end
+    for _, talent in ipairs(lineTalents(lines, "talents")) do rows[#rows + 1] = talentText(talent) end
+    return string.format(S.REMINDER_TALENTS, table.concat(labels, ", ")) .. "\n" .. table.concat(rows, "\n")
 end
 
 function SettingsUI:ShowReminder(match, snapshot)
     reminderMatch = match
+    reminderNote = nil
     local accent = LuckyUI.C.goldPrimary
     local function loadoutName(target)
         return CreateColor(accent[1], accent[2], accent[3]):WrapTextInColorCode(target.name)
     end
-    local choices = match.choices
-    if choices then
+    if match.talents then
+        showReminderRows({})
+        reminderText:SetText(talentLines(match.talents))
+        planTalentStep(true)
+    elseif match.choices then
         reminderText:SetText(S.REMINDER_CHOOSE)
-        for index, choice in ipairs(choices) do
-            local row = reminderChoiceRow(index)
-            row.text:SetText(string.format(S.REMINDER_CHOICE, choice.label, loadoutName(choice.target)))
-            row.switch:SetScript("OnClick", function()
-                LuckyLoadouts.Loadouts:RequestSwitch(choice.configID, "reminder")
-            end)
-            row:Show()
+        local rows = {}
+        for index, choice in ipairs(match.choices) do
+            rows[index] = {
+                text = string.format(S.REMINDER_CHOICE, choice.label, loadoutName(choice.target)),
+                button = S.SWITCH,
+                blocker = function() return LuckyLoadouts.Loadouts:GetSwitchBlocker(choice.configID) end,
+                onClick = function() LuckyLoadouts.Loadouts:RequestSwitch(choice.configID, "reminder") end,
+            }
         end
-        for index = #choices + 1, #reminderChoiceRows do reminderChoiceRows[index]:Hide() end
-        reminderChoices:SetHeight(#choices * REMINDER_CHOICE_HEIGHT)
+        showReminderRows(rows)
+        reminderSwitchBlocker = function() return LuckyLoadouts.Loadouts:GetSwitchBlocker(match.configID) end
     else
+        showReminderRows({})
         reminderText:SetText(string.format(S.REMINDER_TEXT, match.label or snapshot.label, loadoutName(match.target)))
+        reminderSwitch:SetText(S.SWITCH)
+        reminderSwitchBlocker = function() return LuckyLoadouts.Loadouts:GetSwitchBlocker(match.configID) end
+        reminderAction = function() LuckyLoadouts.Loadouts:RequestSwitch(match.configID, "reminder") end
     end
-    reminderChoices:SetShown(choices ~= nil)
-    reminderStatus:SetPoint("TOPLEFT", choices and reminderChoices or reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
-    reminderSwitch:SetShown(not choices)
+    local hasRows = reminderRowCount > 0
+    reminderChoices:SetShown(hasRows)
+    reminderStatus:SetPoint("TOPLEFT", hasRows and reminderChoices or reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
+    reminderSwitch:SetShown(not hasRows)
     setReminderApplying(false)
     updateReminderSwitches()
-    local blocker = LuckyLoadouts.Loadouts:GetSwitchBlocker(match.configID)
-    setReminderStatus(blocker or "", blocker ~= nil)
+    showReminderBlocker()
     reminder:Show()
+end
+
+-- The tree changing under a shown talent reminder can change what Swap would do.
+function SettingsUI:ReplanReminder()
+    if not reminder:IsShown() or not reminderMatch or not reminderMatch.talents
+        or LuckyLoadouts.Talents.GetBlocker() == S.SWAP_PENDING then return end
+    planTalentStep()
+    updateReminderSwitches()
+    showReminderBlocker()
 end
 
 function SettingsUI:HideReminder()
@@ -982,7 +1239,6 @@ end
 
 function SettingsUI:SetReminderCombat(inCombat)
     if not reminder or not reminder:IsShown() or not reminderMatch then return end
-    local blocker = inCombat and S.IN_COMBAT or LuckyLoadouts.Loadouts:GetSwitchBlocker(reminderMatch.configID)
     updateReminderSwitches(inCombat and S.IN_COMBAT or nil)
-    setReminderStatus(blocker or "", blocker ~= nil)
+    showReminderBlocker(inCombat and S.IN_COMBAT or nil)
 end

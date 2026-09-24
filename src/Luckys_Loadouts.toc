@@ -15,5 +15,6 @@ Defaults.lua
 Journal.lua
 Loadouts.lua
 Reminders.lua
+Talents.lua
 Settings.lua
 Core.lua

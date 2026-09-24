@@ -33,11 +33,16 @@ function LuckyLoadouts.GetSpecAssignments(characterDB, specID)
     characterDB.bySpec = type(characterDB.bySpec) == "table" and characterDB.bySpec or {}
     local data = characterDB.bySpec[specID]
     if type(data) ~= "table" then
-        data = { categories = {}, instances = {}, order = {} }
+        data = { categories = {}, instances = {}, order = {}, talents = {}, bossTalents = {} }
         characterDB.bySpec[specID] = data
     end
     data.categories = type(data.categories) == "table" and data.categories or {}
     data.instances = type(data.instances) == "table" and data.instances or {}
     data.order = type(data.order) == "table" and data.order or {}
+    -- Talent reminders: dungeons by instance ID, raid bosses by journal encounter ID.
+    data.talents = type(data.talents) == "table" and data.talents or {}
+    data.bossTalents = type(data.bossTalents) == "table" and data.bossTalents or {}
+    -- Talents a swap may give up, most expendable first.
+    data.giveUp = type(data.giveUp) == "table" and data.giveUp or {}
     return data
 end

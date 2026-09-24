@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Talent reminders** Right-click a dungeon or raid boss in the Assign window to pick talents you want there, straight from your talent tree. Once you are on the right loadout, the reminder lists any you are missing.
+- **Talent swap** Rank the talents you are happy to give up in the Assign window, and the reminder's Swap button makes room for the missing ones on your active talents. Your saved loadout stays untouched, and it never gives up a talent that one you keep or take depends on.
+
 ## [1.1.0] - 2026-09-23
 
 ### Added
