@@ -38,9 +38,9 @@ local reminderStatus
 local reminderSwitch
 local reminderApply
 local reminderMatch
-local reminderChoices
-local reminderChoiceRows = {}
-local reminderRowCount = 0
+local reminderBlocks
+local artBlocks = {}
+local reminderManual
 -- What the reminder's main button does and what blocks it, per step.
 local reminderAction
 local reminderSwitchBlocker = function() return nil end
@@ -549,13 +549,12 @@ local function placeTileIcons(tile, talents)
     for index = shown + 1, #tile.icons do tile.icons[index]:Hide() end
 end
 
--- The owner sets tile.title, tile.talentList(specID) and tile.assign(specID, loadout),
--- a nil loadout clearing.
-local function createTile()
-    local tile = CreateFrame("Button", nil, assignContent, "BackdropTemplate")
-    tile:SetSize(TILE_WIDTH, TILE_HEIGHT)
+-- Adventure Guide art on a BackdropTemplate frame, a boss portrait over it and a
+-- dark strip along the bottom for text.
+local function addTileArt(tile, shadeHeight)
     tile:SetBackdrop(LuckyUI.Backdrop)
     tile:SetBackdropColor(C.bgInput[1], C.bgInput[2], C.bgInput[3], C.bgInput[4])
+    tile:SetBackdropBorderColor(C.borderDark[1], C.borderDark[2], C.borderDark[3])
     tile.art = tile:CreateTexture(nil, "ARTWORK")
     tile.art:SetPoint("TOPLEFT", 1, -1)
     tile.art:SetPoint("BOTTOMRIGHT", -1, 1)
@@ -566,8 +565,24 @@ local function createTile()
     local shade = tile:CreateTexture(nil, "ARTWORK", nil, 2)
     shade:SetPoint("BOTTOMLEFT", 1, 1)
     shade:SetPoint("BOTTOMRIGHT", -1, 1)
-    shade:SetHeight(28)
+    shade:SetHeight(shadeHeight)
     shade:SetColorTexture(0, 0, 0, 0.75)
+end
+
+-- A boss portrait stands on its raid's art, dimmed so the portrait reads first.
+local function setTileArt(tile, art, portrait)
+    tile.art:SetTexture(art)
+    tile.art:SetAlpha(portrait and 0.35 or 1)
+    tile.portrait:SetTexture(portrait)
+    tile.portrait:SetShown(portrait ~= nil)
+end
+
+-- The owner sets tile.title, tile.talentList(specID) and tile.assign(specID, loadout),
+-- a nil loadout clearing.
+local function createTile()
+    local tile = CreateFrame("Button", nil, assignContent, "BackdropTemplate")
+    tile:SetSize(TILE_WIDTH, TILE_HEIGHT)
+    addTileArt(tile, 28)
     tile.loadout = makeText(tile, 10, C.goldPrimary)
     tile.loadout:SetPoint("BOTTOMLEFT", 5, 4)
     tile.loadout:SetPoint("BOTTOMRIGHT", -5, 4)
@@ -738,8 +753,7 @@ local function fitAssignments(contentHeight)
     assignScroll.ScrollBar:SetShown(contentHeight > listHeight)
 end
 
--- Dungeon tiles, then each raid's name heading tiles for its bosses. A boss
--- portrait stands on its raid's art, dimmed so the portrait reads first.
+-- Dungeon tiles, then each raid's name heading tiles for its bosses.
 local function refreshSeason(data, byID)
     local dungeons, raids = {}, {}
     for _, instance in ipairs(LuckyLoadouts.Journal.Season()) do
@@ -762,10 +776,7 @@ local function refreshSeason(data, byID)
         tiles[used] = tile
         local column, line = (slot - 1) % TILES_PER_ROW, math.floor((slot - 1) / TILES_PER_ROW)
         tile:SetPoint("TOPLEFT", DIALOG_PAD + column * (TILE_WIDTH + TILE_GAP), -(top + line * (TILE_HEIGHT + TILE_GAP)))
-        tile.art:SetTexture(art)
-        tile.art:SetAlpha(portrait and 0.35 or 1)
-        tile.portrait:SetTexture(portrait)
-        tile.portrait:SetShown(portrait ~= nil)
+        setTileArt(tile, art, portrait)
         tile.name:SetText(title)
         tile.loadout:SetText(configID and assignedName(configID, byID) or "")
         local border = configID and C.goldAccent or C.borderDark
@@ -818,45 +829,212 @@ local function refreshSeason(data, byID)
 end
 
 local REMINDER_WIDTH = 420
+local REMINDER_MAX_WIDTH = 720
 local REMINDER_TEXT_TOP = CONTENT_TOP
 local REMINDER_LINE_GAP = 6
-local REMINDER_CHOICE_HEIGHT = 28
+local ART_TILE_WIDTH = 100
+local ART_TILE_GAP = 10
+local ART_BLOCK_GAP = 8
+local SWAP_ROW_HEIGHT = 28
+local SWAP_ICON_SIZE = 24
+local SWAP_ICON_GAP = 6
+local SWAP_COLUMN_GAP = 16
+local CHOICE_BUTTON_WIDTH = 90
 
--- Grow to the wrapped text, so a short reminder has no gap above the buttons.
-local function fitReminder()
-    local status = reminderStatus:GetText()
-    local statusHeight = (status and status ~= "") and (REMINDER_LINE_GAP + reminderStatus:GetStringHeight()) or 0
-    local choicesHeight = reminderChoices:IsShown() and (REMINDER_LINE_GAP + reminderChoices:GetHeight()) or 0
-    reminder:SetHeight(REMINDER_TEXT_TOP + reminderText:GetStringHeight() + choicesHeight + statusHeight
-        + DIALOG_PAD + BUTTON_HEIGHT + DIALOG_PAD)
+local function regionHeight(region)
+    if not region:IsShown() then return 0 end
+    if not region:IsObjectType("FontString") then return region:GetHeight() end
+    local text = region:GetText()
+    return (text and text ~= "") and region:GetStringHeight() or 0
 end
 
-local function reminderChoiceRow(index)
-    local row = reminderChoiceRows[index]
+-- Stack what the step shows and grow to it, so there is no gap above the buttons.
+local function fitReminder()
+    local top = REMINDER_TEXT_TOP
+    for _, region in ipairs({ reminderText, reminderBlocks, reminderStatus }) do
+        local height = regionHeight(region)
+        if height > 0 then
+            region:SetPoint("TOPLEFT", DIALOG_PAD, -top)
+            top = top + height + REMINDER_LINE_GAP
+        end
+    end
+    reminder:SetHeight(top - REMINDER_LINE_GAP + DIALOG_PAD + BUTTON_HEIGHT + DIALOG_PAD)
+end
+
+-- A talent icon framed in the colour the talent tree marks it with.
+local function makeTalentIcon(parent, color)
+    local icon = CreateFrame("Frame", nil, parent)
+    icon:SetSize(SWAP_ICON_SIZE, SWAP_ICON_SIZE)
+    local border = icon:CreateTexture(nil, "BACKGROUND")
+    border:SetAllPoints()
+    border:SetColorTexture(color[1], color[2], color[3], 1)
+    icon.texture = icon:CreateTexture(nil, "ARTWORK")
+    icon.texture:SetPoint("TOPLEFT", 1, -1)
+    icon.texture:SetPoint("BOTTOMRIGHT", -1, 1)
+    icon.texture:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    return icon
+end
+
+local function swapRow(block, index)
+    local row = block.rows[index]
     if row then return row end
-    row = CreateFrame("Frame", nil, reminderChoices)
-    row:SetHeight(REMINDER_CHOICE_HEIGHT)
-    row:SetPoint("TOPLEFT", 0, -(index - 1) * REMINDER_CHOICE_HEIGHT)
-    row:SetPoint("TOPRIGHT", 0, -(index - 1) * REMINDER_CHOICE_HEIGHT)
-    row.switch = makeButton(row, S.SWITCH, 90, "primary")
-    row.switch:SetPoint("RIGHT")
-    row.text = makeText(row, 12, C.textLight)
-    row.text:SetPoint("LEFT")
-    row.text:SetPoint("RIGHT", row.switch, "LEFT", -8, 0)
-    row.text:SetJustifyH("LEFT")
-    row.text:SetWordWrap(false)
-    reminderChoiceRows[index] = row
+    row = CreateFrame("Frame", nil, block)
+    row:SetHeight(SWAP_ROW_HEIGHT)
+    row.take = makeTalentIcon(row, LuckyLoadouts.Talents.TAKE_COLOR)
+    row.take:SetPoint("LEFT")
+    row.takeName = makeText(row, 12, C.textLight)
+    row.takeName:SetPoint("LEFT", row.take, "RIGHT", SWAP_ICON_GAP, 0)
+    row.detail = makeText(row, 11, C.textMuted)
+    row.giveUp = makeTalentIcon(row, C.danger)
+    row.giveUp:SetPoint("LEFT", row.detail, "RIGHT", SWAP_ICON_GAP, 0)
+    row.giveUpName = makeText(row, 12, C.textMuted)
+    row.giveUpName:SetPoint("LEFT", row.giveUp, "RIGHT", SWAP_ICON_GAP, 0)
+    row.giveUpName:SetPoint("RIGHT")
+    for _, text in ipairs({ row.takeName, row.detail, row.giveUpName }) do
+        text:SetJustifyH("LEFT")
+        text:SetWordWrap(false)
+    end
+    block.rows[index] = row
     return row
+end
+
+-- The talent to take and, beside it, what the swap gives up for it or why it cannot.
+local function fillSwapRow(row, talent, freed, reason)
+    local Talents = LuckyLoadouts.Talents
+    row.take.texture:SetTexture(Talents.Icon(talent) or 134400)
+    row.takeName:SetText(Talents.SpellName(talent))
+    local givesUp = freed ~= nil and #freed > 0
+    row.detail:SetText(givesUp and S.SWAP_INSTEAD_OF or freed and S.SWAP_SPARE or reason or "")
+    row.giveUp:SetShown(givesUp)
+    row.giveUpName:SetShown(givesUp)
+    if givesUp then
+        row.giveUp.texture:SetTexture(Talents.Icon(freed[1]) or 134400)
+        row.giveUpName:SetText(talentNames(freed))
+    end
+    row:Show()
+end
+
+local function textWidth(text)
+    return math.ceil(text:GetUnboundedStringWidth()) + 2
+end
+
+-- Widen the reminder until every talent name fits on its line. Past the cap
+-- the names truncate, the one given up first.
+local function fitSwapColumns(rows)
+    local takeWidth, rightWidth = 0, 0
+    for _, row in ipairs(rows) do
+        takeWidth = math.max(takeWidth, textWidth(row.takeName))
+        local right = textWidth(row.detail)
+        if row.giveUp:IsShown() then
+            right = right + SWAP_ICON_GAP * 2 + SWAP_ICON_SIZE + textWidth(row.giveUpName)
+        end
+        rightWidth = math.max(rightWidth, right)
+    end
+    local giveUpLeft = SWAP_ICON_SIZE + SWAP_ICON_GAP + takeWidth + SWAP_COLUMN_GAP
+    local chrome = DIALOG_PAD * 2 + ART_TILE_WIDTH + ART_TILE_GAP
+    local width = math.max(REMINDER_WIDTH, math.min(chrome + giveUpLeft + rightWidth, REMINDER_MAX_WIDTH))
+    local available = width - chrome
+    if giveUpLeft + rightWidth > available then
+        giveUpLeft = math.max(available - rightWidth, available / 2)
+    end
+    reminder:SetWidth(width)
+    for _, row in ipairs(rows) do
+        row.takeName:SetPoint("RIGHT", row, "LEFT", giveUpLeft - SWAP_COLUMN_GAP, 0)
+        row.detail:ClearAllPoints()
+        row.detail:SetPoint("LEFT", giveUpLeft, 0)
+        if not row.giveUp:IsShown() then row.detail:SetPoint("RIGHT") end
+    end
+end
+
+local function artBlock(index)
+    local block = artBlocks[index]
+    if block then return block end
+    block = CreateFrame("Frame", nil, reminderBlocks)
+    block.tile = CreateFrame("Frame", nil, block, "BackdropTemplate")
+    block.tile:SetSize(ART_TILE_WIDTH, TILE_HEIGHT)
+    block.tile:SetPoint("TOPLEFT")
+    addTileArt(block.tile, 18)
+    block.tile.name = makeText(block.tile, 10, C.textLight)
+    block.tile.name:SetPoint("BOTTOMLEFT", 5, 4)
+    block.tile.name:SetPoint("BOTTOMRIGHT", -5, 4)
+    block.tile.name:SetJustifyH("LEFT")
+    block.tile.name:SetWordWrap(false)
+    block.message = makeText(block, 12, C.textLight)
+    block.message:SetPoint("LEFT", block.tile, "RIGHT", ART_TILE_GAP, 0)
+    block.message:SetJustifyH("LEFT")
+    block.switch = makeButton(block, S.SWITCH, CHOICE_BUTTON_WIDTH, "primary")
+    block.switch:SetPoint("RIGHT")
+    block.rows = {}
+    artBlocks[index] = block
+    return block
+end
+
+-- A dungeon or boss tile; the caller fills what sits beside it.
+local function placeArtBlock(index, top, height, art, portrait, label)
+    local block = artBlock(index)
+    block:SetPoint("TOPLEFT", 0, -top)
+    block:SetPoint("TOPRIGHT", 0, -top)
+    block:SetHeight(height)
+    setTileArt(block.tile, art, portrait)
+    block.tile.name:SetText(label)
+    block.message:Hide()
+    block.switch:Hide()
+    block.blocker = nil
+    for _, row in ipairs(block.rows) do row:Hide() end
+    block:Show()
+    return block
+end
+
+local function finishArtBlocks(count, top)
+    for index = count + 1, #artBlocks do artBlocks[index]:Hide() end
+    reminderBlocks:SetHeight(math.max(top - ART_BLOCK_GAP, 1))
+end
+
+-- One block per dungeon or next boss: its art, then each missing talent beside it.
+local function showSwapBlocks(lines, plan, reasons, art)
+    local top, filled = 0, {}
+    for index, line in ipairs(lines) do
+        local height = math.max(TILE_HEIGHT, #line.talents * SWAP_ROW_HEIGHT)
+        local block = placeArtBlock(index, top, height, art, line.portrait, line.label)
+        local rowsTop = (height - #line.talents * SWAP_ROW_HEIGHT) / 2
+        for rowIndex, talent in ipairs(line.talents) do
+            local row = swapRow(block, rowIndex)
+            local y = -(rowsTop + (rowIndex - 1) * SWAP_ROW_HEIGHT)
+            row:SetPoint("TOPLEFT", ART_TILE_WIDTH + ART_TILE_GAP, y)
+            row:SetPoint("TOPRIGHT", 0, y)
+            fillSwapRow(row, talent, plan.freedFor[talent.nodeID], reasons[talent.nodeID])
+            filled[#filled + 1] = row
+        end
+        top = top + height + ART_BLOCK_GAP
+    end
+    finishArtBlocks(#lines, top)
+    fitSwapColumns(filled)
+end
+
+-- Each entry is { portrait, label, text } and, for a choice, { onClick, blocker }.
+local function showLoadoutBlocks(entries, art)
+    local top = 0
+    for index, entry in ipairs(entries) do
+        local block = placeArtBlock(index, top, TILE_HEIGHT, art, entry.portrait, entry.label)
+        block.message:SetPoint("RIGHT", entry.onClick and -(CHOICE_BUTTON_WIDTH + BUTTON_GAP) or 0, 0)
+        block.message:SetText(entry.text)
+        block.message:Show()
+        block.switch:SetShown(entry.onClick ~= nil)
+        block.switch:SetScript("OnClick", entry.onClick)
+        block.blocker = entry.blocker
+        top = top + TILE_HEIGHT + ART_BLOCK_GAP
+    end
+    finishArtBlocks(#entries, top)
 end
 
 -- Each button on the reminder with what would block it.
 local function reminderSwitches()
     if not reminderMatch then return {} end
-    if reminderRowCount == 0 then return { { button = reminderSwitch, blocker = reminderSwitchBlocker } } end
+    if not reminderMatch.choices then return { { button = reminderSwitch, blocker = reminderSwitchBlocker } } end
     local switches = {}
-    for index = 1, reminderRowCount do
-        local row = reminderChoiceRows[index]
-        switches[index] = { button = row.switch, blocker = row.blocker }
+    for index = 1, #reminderMatch.choices do
+        local block = artBlocks[index]
+        switches[index] = { button = block.switch, blocker = block.blocker }
     end
     return switches
 end
@@ -890,18 +1068,21 @@ local function createReminder()
     reminderText:SetPoint("TOPLEFT", DIALOG_PAD, -REMINDER_TEXT_TOP)
     reminderText:SetPoint("RIGHT", -DIALOG_PAD, 0)
     reminderText:SetJustifyH("LEFT")
-    reminderChoices = CreateFrame("Frame", nil, reminder)
-    reminderChoices:SetPoint("TOPLEFT", reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
-    reminderChoices:SetPoint("RIGHT", -DIALOG_PAD, 0)
-    reminderChoices:Hide()
+    reminderBlocks = CreateFrame("Frame", nil, reminder)
+    reminderBlocks:SetPoint("TOPLEFT", DIALOG_PAD, -REMINDER_TEXT_TOP)
+    reminderBlocks:SetPoint("RIGHT", -DIALOG_PAD, 0)
+    reminderBlocks:Hide()
     reminderStatus = makeText(reminder, 11, C.textMuted)
-    reminderStatus:SetPoint("TOPLEFT", reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
+    reminderStatus:SetPoint("TOPLEFT", DIALOG_PAD, -REMINDER_TEXT_TOP)
     reminderStatus:SetPoint("RIGHT", -DIALOG_PAD, 0)
     reminderStatus:SetJustifyH("LEFT")
 
     local dismiss = makeButton(reminder, S.DISMISS, 90)
     reminderSwitch = makeButton(reminder, S.SWITCH, 90, "primary")
     placeButtonPair(reminder, reminderSwitch, dismiss)
+    reminderManual = makeButton(reminder, S.MANUAL, 90)
+    reminderManual:SetPoint("RIGHT", reminderSwitch, "LEFT", -BUTTON_GAP, 0)
+    reminderManual:Hide()
     reminderApply = makeButton(reminder, S.APPLY, 90, "primary")
     reminderApply:SetAllPoints(reminderSwitch)
     reminderApply:Hide()
@@ -1113,21 +1294,6 @@ function SettingsUI:RefreshAssignments()
     refreshSeason(data, byID)
 end
 
--- Each row is { text, button, onClick, blocker }.
-local function showReminderRows(rows)
-    for index, entry in ipairs(rows) do
-        local row = reminderChoiceRow(index)
-        row.text:SetText(entry.text)
-        row.switch:SetText(entry.button)
-        row.switch:SetScript("OnClick", entry.onClick)
-        row.blocker = entry.blocker
-        row:Show()
-    end
-    for index = #rows + 1, #reminderChoiceRows do reminderChoiceRows[index]:Hide() end
-    reminderRowCount = #rows
-    reminderChoices:SetHeight(#rows * REMINDER_CHOICE_HEIGHT)
-end
-
 local function noBlocker() return nil end
 
 local function swapFailed(message)
@@ -1149,8 +1315,15 @@ local function lineTalents(lines, key)
     return talents
 end
 
+local function currentArt()
+    local journalID = LuckyLoadouts.Journal.CurrentJournalID()
+    local instance = journalID and LuckyLoadouts.Journal.Instance(journalID)
+    return instance and instance.art
+end
+
 -- Plan the swap against the talents as they stand now: Swap when it can take
--- anything, otherwise open the tree, and a note of what it gives up or cannot do.
+-- anything, with Manual beside it to choose what goes instead, otherwise open
+-- the tree. Each missing talent shows what the swap gives up for it.
 local function planTalentStep(explain)
     local Talents = LuckyLoadouts.Talents
     local missing = lineTalents(reminderMatch.talents, "talents")
@@ -1160,6 +1333,8 @@ local function planTalentStep(explain)
     local canSwap = #plan.take > 0
     reminderSwitch:SetText(canSwap and S.SWAP or S.OPEN_TALENTS)
     reminderSwitchBlocker = canSwap and Talents.GetBlocker or noBlocker
+    reminderManual:SetShown(canSwap)
+    reminderManual:SetScript("OnClick", function() Talents.PointOut(missing) end)
     reminderAction = function()
         if not canSwap then
             Talents.PointOut(missing)
@@ -1169,55 +1344,58 @@ local function planTalentStep(explain)
         setReminderStatus(ok and S.SWAP_PENDING or err, not ok)
         updateReminderSwitches()
     end
-    local notes = { #giveUps == 0 and S.SWAP_NO_LIST or nil }
-    if #plan.giveUp > 0 then notes[#notes + 1] = string.format(S.SWAP_GIVES_UP, talentNames(plan.giveUp)) end
-    if #plan.blocked > 0 and #giveUps > 0 then notes[#notes + 1] = string.format(S.SWAP_CANNOT, talentNames(plan.blocked)) end
-    if #plan.locked > 0 then notes[#notes + 1] = string.format(S.SWAP_LOCKED, talentNames(plan.locked)) end
-    reminderNote = table.concat(notes, " ")
-end
-
-local function talentLines(lines)
-    local labels, rows = {}, {}
-    for _, line in ipairs(lines) do labels[#labels + 1] = line.label end
-    for _, talent in ipairs(lineTalents(lines, "talents")) do rows[#rows + 1] = talentText(talent) end
-    return string.format(S.REMINDER_TALENTS, table.concat(labels, ", ")) .. "\n" .. table.concat(rows, "\n")
+    local reasons = {}
+    for _, talent in ipairs(plan.locked) do reasons[talent.nodeID] = S.SWAP_LOCKED end
+    if #giveUps > 0 then
+        for _, talent in ipairs(plan.blocked) do reasons[talent.nodeID] = S.SWAP_CANNOT end
+    end
+    showSwapBlocks(reminderMatch.talents, plan, reasons, currentArt())
+    reminderNote = #giveUps == 0 and S.SWAP_NO_LIST or nil
 end
 
 function SettingsUI:ShowReminder(match, snapshot)
     reminderMatch = match
     reminderNote = nil
     local accent = LuckyUI.C.goldPrimary
-    local function loadoutName(target)
-        return CreateColor(accent[1], accent[2], accent[3]):WrapTextInColorCode(target.name)
+    local function loadoutText(label, target)
+        local name = CreateColor(accent[1], accent[2], accent[3]):WrapTextInColorCode(target.name)
+        return string.format(S.REMINDER_TEXT, label, name)
     end
+    -- An open world map can resolve to a world boss page in the journal.
+    local art = (snapshot.category == "Dungeon" or snapshot.category == "Raid") and currentArt() or nil
+    local hasArt = art ~= nil or match.portrait ~= nil or match.choices ~= nil
+    reminder:SetWidth(REMINDER_WIDTH)
+    reminderManual:Hide()
+    reminderText:SetShown(match.choices ~= nil or not (match.talents or hasArt))
+    reminderBlocks:SetShown(match.talents ~= nil or hasArt)
     if match.talents then
-        showReminderRows({})
-        reminderText:SetText(talentLines(match.talents))
         planTalentStep(true)
     elseif match.choices then
         reminderText:SetText(S.REMINDER_CHOOSE)
-        local rows = {}
+        local entries = {}
         for index, choice in ipairs(match.choices) do
-            rows[index] = {
-                text = string.format(S.REMINDER_CHOICE, choice.label, loadoutName(choice.target)),
-                button = S.SWITCH,
+            entries[index] = {
+                portrait = choice.portrait,
+                label = choice.label,
+                text = loadoutText(choice.label, choice.target),
                 blocker = function() return LuckyLoadouts.Loadouts:GetSwitchBlocker(choice.configID) end,
                 onClick = function() LuckyLoadouts.Loadouts:RequestSwitch(choice.configID, "reminder") end,
             }
         end
-        showReminderRows(rows)
+        showLoadoutBlocks(entries, art)
         reminderSwitchBlocker = function() return LuckyLoadouts.Loadouts:GetSwitchBlocker(match.configID) end
     else
-        showReminderRows({})
-        reminderText:SetText(string.format(S.REMINDER_TEXT, match.label or snapshot.label, loadoutName(match.target)))
+        local label = match.label or snapshot.label
+        if hasArt then
+            showLoadoutBlocks({ { portrait = match.portrait, label = label, text = loadoutText(label, match.target) } }, art)
+        else
+            reminderText:SetText(loadoutText(label, match.target))
+        end
         reminderSwitch:SetText(S.SWITCH)
         reminderSwitchBlocker = function() return LuckyLoadouts.Loadouts:GetSwitchBlocker(match.configID) end
         reminderAction = function() LuckyLoadouts.Loadouts:RequestSwitch(match.configID, "reminder") end
     end
-    local hasRows = reminderRowCount > 0
-    reminderChoices:SetShown(hasRows)
-    reminderStatus:SetPoint("TOPLEFT", hasRows and reminderChoices or reminderText, "BOTTOMLEFT", 0, -REMINDER_LINE_GAP)
-    reminderSwitch:SetShown(not hasRows)
+    reminderSwitch:SetShown(not match.choices)
     setReminderApplying(false)
     updateReminderSwitches()
     showReminderBlocker()

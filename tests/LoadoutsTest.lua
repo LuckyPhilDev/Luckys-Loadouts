@@ -689,6 +689,8 @@ check(ids(plan.take) == "10" and ids(plan.blocked) == "60",
     "a talent left without room is reported instead of swapped")
 plan = Talents.PlanSwap({ soothe, cyclone }, { typhoon })
 check(ids(plan.take) == "10,60" and ids(plan.giveUp) == "40", "a two-rank talent makes room for two")
+check(ids(plan.freedFor[10]) == "40" and ids(plan.freedFor[60]) == "",
+    "each taken talent names what it gave up, none when spare points covered it")
 plan = Talents.PlanSwap({ otherSide }, {})
 check(ids(plan.take) == "30" and #plan.giveUp == 0, "a choice node already bought changes sides for free")
 plan = Talents.PlanSwap({ soothe }, {})

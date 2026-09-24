@@ -22,7 +22,8 @@ local RING_SCALE = 1.2
 local RING_GLOW_SCALE = 1.4
 local PULSE_SECONDS = 1.4
 local RING_FALLBACK_ATLAS = "talents-node-circle-yellow"
-local TAKE_COLOR = { 0.25, 0.9, 1 }
+Talents.TAKE_COLOR = { 0.25, 0.9, 1 }
+local TAKE_COLOR = Talents.TAKE_COLOR
 local CIRCLE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 
 local function entrySpell(configID, entryID)
@@ -150,12 +151,13 @@ end
 
 -- Which missing talents a swap can take, and which talents it gives up for
 -- them: the first in priority order that are taken, not kept, that Blizzard
--- lets go of, and that nothing kept or taken depends on.
+-- lets go of, and that nothing kept or taken depends on. freedFor holds what
+-- each taken talent gave up, empty when earlier refunds already covered it.
 -- ponytail: unspent points are not counted, a refund left over from a bigger
 -- talent stays unspent, and missing talents are taken in list order, so one
 -- whose parent is also missing must come after it.
 function Talents.PlanSwap(missing, giveUps, keep, explain)
-    local plan = { take = {}, giveUp = {}, blocked = {}, locked = {} }
+    local plan = { take = {}, giveUp = {}, blocked = {}, locked = {}, freedFor = {} }
     local configID = C_ClassTalents.GetActiveConfigID()
     local tree = simulatedTree(configID)
     local isWanted, used, credit = {}, {}, {}
@@ -212,6 +214,7 @@ function Talents.PlanSwap(missing, giveUps, keep, explain)
             if have >= need then
                 credit[pool] = have - need
                 plan.take[#plan.take + 1] = talent
+                plan.freedFor[talent.nodeID] = freed
                 for _, candidate in ipairs(freed) do plan.giveUp[#plan.giveUp + 1] = candidate end
             else
                 tree.Restore(talent.nodeID)

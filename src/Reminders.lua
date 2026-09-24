@@ -95,7 +95,7 @@ local function resolveBosses(entry, snapshot, loadoutsByID)
             if choice then
                 choice.label = choice.label .. ", " .. boss.name
             else
-                choice = { configID = configID, label = boss.name, target = target }
+                choice = { configID = configID, label = boss.name, target = target, portrait = boss.portrait }
                 byConfig[configID] = choice
                 choices[#choices + 1] = choice
             end
@@ -110,6 +110,7 @@ local function resolveBosses(entry, snapshot, loadoutsByID)
         source = "boss:" .. table.concat(ids, ","),
         label = first.label,
         target = first.target,
+        portrait = first.portrait,
         valid = true,
         choices = #choices > 1 and choices or nil,
     }
@@ -173,7 +174,7 @@ function Reminders.ResolveTalents(assignments, snapshot, isTaken)
         sources[1] = { label = snapshot.label, list = assignments.talents and assignments.talents[snapshot.instanceID] }
     elseif snapshot.category == "Raid" then
         for _, boss in ipairs(snapshot.bosses or {}) do
-            sources[#sources + 1] = { label = boss.name,
+            sources[#sources + 1] = { label = boss.name, portrait = boss.portrait,
                 list = assignments.bossTalents and assignments.bossTalents[boss.encounterID] }
         end
     end
@@ -183,7 +184,9 @@ function Reminders.ResolveTalents(assignments, snapshot, isTaken)
         for _, talent in ipairs(type(source.list) == "table" and source.list or {}) do
             if isTaken(talent) == false then missing[#missing + 1] = talent end
         end
-        if #missing > 0 then lines[#lines + 1] = { label = source.label, talents = missing, wanted = source.list } end
+        if #missing > 0 then
+            lines[#lines + 1] = { label = source.label, portrait = source.portrait, talents = missing, wanted = source.list }
+        end
     end
     return #lines > 0 and lines or nil
 end
