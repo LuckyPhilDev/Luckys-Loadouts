@@ -1,7 +1,7 @@
 ## Interface: 120100
 ## Title: Lucky's Loadouts
 ## Notes: Loadout assignments and content reminders.
-## Version: 1.1.0
+## Version: 1.2.0
 ## Author: Lucky Phil
 ## SavedVariables: LuckyLoadoutsDB, LuckySettingsDB, LuckyRosterDB
 ## SavedVariablesPerCharacter: LuckyLoadoutsCharDB
