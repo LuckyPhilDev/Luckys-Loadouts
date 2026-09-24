@@ -187,6 +187,16 @@ function Loadouts:GetSwitchBlocker(configID)
     local list, err, byID = self:Read(specID)
     if not list then return err end
     if not byID[configID] then return S.LOADOUT_MISSING end
+    return self:GetEditBlocker()
+end
+
+-- Why the active talents cannot change right now, or nil when they can.
+function Loadouts:GetEditBlocker()
+    if pending then return S.SWITCH_PENDING end
+    local talents = talentFrame()
+    if talents and talents:IsCommitInProgress() then return S.SWITCH_PENDING end
+    if InCombatLockdown() then return S.IN_COMBAT end
+    if not currentSpec() then return S.NO_SPEC end
 
     local staged = hasStagedChanges()
     if staged == nil then return S.NATIVE_UNKNOWN end
