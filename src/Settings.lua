@@ -28,6 +28,9 @@ local renameSave
 local renameEdit
 local renameStatus
 local renameTarget
+local importPrompt
+local importEdit
+local dialogMode
 local assignDialog
 local assignStatus
 local assignCategoryRows = {}
@@ -351,11 +354,17 @@ local function createRenameDialog()
     renamePrompt:SetPoint("TOPLEFT", DIALOG_PAD, -CONTENT_TOP)
     renamePrompt:SetText(S.RENAME_PROMPT)
 
-    renameEdit = LuckyUI.CreateInput(renameDialog, { width = 360 - DIALOG_PAD * 2, height = BUTTON_HEIGHT })
+    local inputOptions = { width = 360 - DIALOG_PAD * 2, height = BUTTON_HEIGHT, maxLetters = 0 }
+    renameEdit = LuckyUI.CreateInput(renameDialog, inputOptions)
     renameEdit:SetPoint("TOPLEFT", renamePrompt, "BOTTOMLEFT", 0, -6)
 
+    importPrompt = makeText(renameDialog, 12, C.textLight)
+    importPrompt:SetPoint("TOPLEFT", renameEdit, "BOTTOMLEFT", 0, -10)
+    importPrompt:SetText(S.IMPORT_PROMPT_OPTIONAL)
+    importEdit = LuckyUI.CreateInput(renameDialog, inputOptions)
+    importEdit:SetPoint("TOPLEFT", importPrompt, "BOTTOMLEFT", 0, -6)
+
     renameStatus = makeText(renameDialog, 10, C.danger)
-    renameStatus:SetPoint("TOPLEFT", renameEdit, "BOTTOMLEFT", 0, -5)
     renameStatus:SetPoint("RIGHT", -DIALOG_PAD, 0)
     renameStatus:SetJustifyH("LEFT")
 
@@ -365,39 +374,47 @@ local function createRenameDialog()
     cancel:SetScript("OnClick", function() renameDialog:Hide() end)
     renameSave:SetScript("OnClick", function()
         local ok, err
-        if renameTarget then
+        if dialogMode == "rename" then
             ok, err = LuckyLoadouts.Loadouts:Rename(renameTarget, renameEdit:GetText())
         else
-            ok, err = LuckyLoadouts.Loadouts:Create(renameEdit:GetText())
+            ok, err = LuckyLoadouts.Loadouts:Create(renameEdit:GetText(), importEdit:GetText())
         end
         if not ok then setStatus(renameStatus, err, true) else setStatus(renameStatus, S.LOADING, false) end
     end)
-    renameEdit:SetScript("OnEnterPressed", function() renameSave:Click() end)
-    renameEdit:SetScript("OnEscapePressed", function() renameDialog:Hide() end)
+    for _, edit in ipairs({ renameEdit, importEdit }) do
+        edit:SetScript("OnEnterPressed", function() renameSave:Click() end)
+        edit:SetScript("OnEscapePressed", function() renameDialog:Hide() end)
+    end
+end
+
+-- The import field shows only when creating, and the status sits under
+-- whichever field is last.
+local function openDialog(mode, title, prompt, button, text)
+    dialogMode = mode
+    local creating = mode == "create"
+    renameTitle:SetText(title)
+    renamePrompt:SetText(prompt)
+    renameSave:SetText(button)
+    renameEdit:SetText(text)
+    renameEdit:HighlightText()
+    importEdit:SetText("")
+    importPrompt:SetShown(creating)
+    importEdit:SetShown(creating)
+    renameStatus:SetPoint("TOPLEFT", creating and importEdit or renameEdit, "BOTTOMLEFT", 0, -5)
+    renameDialog:SetHeight(creating and 213 or 163)
+    setStatus(renameStatus, "", false)
+    renameDialog:Show()
+    renameEdit:SetFocus()
 end
 
 function showRename(entry)
     renameTarget = entry.id
-    renameTitle:SetText(S.RENAME_TITLE)
-    renamePrompt:SetText(S.RENAME_PROMPT)
-    renameSave:SetText(S.SAVE)
-    renameEdit:SetText(entry.name)
-    renameEdit:HighlightText()
-    setStatus(renameStatus, "", false)
-    renameDialog:Show()
-    renameEdit:SetFocus()
+    openDialog("rename", S.RENAME_TITLE, S.RENAME_PROMPT, S.SAVE, entry.name)
 end
 
 function showCreate()
     renameTarget = nil
-    renameTitle:SetText(S.CREATE_TITLE)
-    renamePrompt:SetText(S.CREATE_PROMPT)
-    renameSave:SetText(S.CREATE)
-    renameEdit:SetText(S.NEW_LOADOUT_NAME)
-    renameEdit:HighlightText()
-    setStatus(renameStatus, "", false)
-    renameDialog:Show()
-    renameEdit:SetFocus()
+    openDialog("create", S.CREATE_TITLE, S.CREATE_PROMPT, S.CREATE, S.NEW_LOADOUT_NAME)
 end
 
 local function showLoadoutPicker(owner, list, onSelect)

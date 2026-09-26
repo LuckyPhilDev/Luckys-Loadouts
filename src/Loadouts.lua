@@ -1,4 +1,6 @@
--- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin
+-- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin ExportUtil
+-- luacheck: globals LOADOUT_ERROR_BAD_STRING LOADOUT_ERROR_SERIALIZATION_VERSION_MISMATCH
+-- luacheck: globals LOADOUT_ERROR_WRONG_SPEC LOADOUT_ERROR_TREE_CHANGED
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Loadouts = {}
@@ -119,6 +121,34 @@ local function handOffToTalentFrame(configID, state)
         talents:SetCommitStarted(configID, TalentFrameBaseMixin.CommitUpdateReasons.CommitStarted)
         talents:UpdateConfigButtonsState()
     end
+end
+
+-- Reads a talent string with Blizzard's own parser, checked the way its import
+-- dialog checks it, into the entries C_ClassTalents.ImportLoadout takes.
+local function readImport(text)
+    text = trim(type(text) == "string" and text or "")
+    if text == "" then return nil, S.IMPORT_BLANK end
+    local talents = talentFrame()
+    local configID = C_ClassTalents.GetActiveConfigID()
+    local config = configID and C_Traits.GetConfigInfo(configID)
+    local treeID = config and config.treeIDs and config.treeIDs[1]
+    if not talents or not talents.ReadLoadoutHeader or not treeID then return nil, S.IMPORT_UNAVAILABLE end
+
+    local ok, entries, err = pcall(function()
+        local stream = ExportUtil.MakeImportDataStream(text)
+        local valid, version, specID, treeHash = talents:ReadLoadoutHeader(stream)
+        if not valid then return nil, LOADOUT_ERROR_BAD_STRING end
+        if version ~= C_Traits.GetLoadoutSerializationVersion() then
+            return nil, LOADOUT_ERROR_SERIALIZATION_VERSION_MISMATCH
+        end
+        if specID ~= currentSpec() then return nil, LOADOUT_ERROR_WRONG_SPEC end
+        if not talents:IsHashEmpty(treeHash) and not talents:HashEquals(treeHash, C_Traits.GetTreeHash(treeID)) then
+            return nil, LOADOUT_ERROR_TREE_CHANGED
+        end
+        return talents:ConvertToImportLoadoutEntryInfo(configID, treeID, talents:ReadLoadoutContent(stream, treeID))
+    end)
+    if not ok then return nil, LOADOUT_ERROR_BAD_STRING end
+    return entries, err, configID, treeID
 end
 
 -- Blizzard moves the pointer only once the loadout is live, so an interrupted
@@ -348,7 +378,20 @@ function Loadouts:Move(configID, toIndex)
     return true
 end
 
-function Loadouts:Create(name)
+-- A new loadout from a talent string, made the way Blizzard's import dialog makes one.
+local function createFromImport(name, text)
+    local entries, err, configID = readImport(text)
+    if not entries then return false, err end
+    local ok, created, nativeErr = pcall(C_ClassTalents.ImportLoadout, configID, entries, name, trim(text))
+    if not ok or not created then return false, ok and nativeErr or S.IMPORT_FAILED end
+    -- Has the talent frame load the new loadout once Blizzard has filled it in.
+    local talents = talentFrame()
+    if talents.OnTraitConfigCreateStarted then talents:OnTraitConfigCreateStarted(#entries > 0) end
+    emit("created", S.CREATE_OK)
+    return true
+end
+
+function Loadouts:Create(name, importText)
     if not currentSpec() then return false, S.NO_SPEC end
     if InCombatLockdown() then return false, S.IN_COMBAT end
     name = trim(type(name) == "string" and name or "")
@@ -357,6 +400,7 @@ function Loadouts:Create(name)
         return false, S.CREATE_FAILED
     end
     if not C_ClassTalents.CanCreateNewConfig() then return false, S.CREATE_LIMIT end
+    if trim(importText or "") ~= "" then return createFromImport(name, importText) end
 
     local ok, created = pcall(C_ClassTalents.RequestNewConfig, name)
     if not ok or created ~= true then return false, S.CREATE_FAILED end

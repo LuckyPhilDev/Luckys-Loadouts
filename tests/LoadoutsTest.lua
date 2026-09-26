@@ -1,5 +1,6 @@
--- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin Enum C_Timer C_ClassTalents C_Traits C_Map C_PartyInfo
+-- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin Enum C_Timer C_ClassTalents C_Traits C_Map C_PartyInfo ExportUtil
 -- luacheck: globals GetSpecialization GetSpecializationInfo InCombatLockdown IsInInstance GetInstanceInfo CreateFrame
+-- luacheck: globals LOADOUT_ERROR_BAD_STRING
 -- luacheck: globals C_RaidLocks EJ_GetInstanceForMap EJ_SelectInstance EJ_GetEncounterInfoByIndex EJ_GetCreatureInfo
 
 local script = arg[0]:gsub("\\", "/")
@@ -749,5 +750,35 @@ check(Talents.Swap({ soothe }, { roar }, nil, function(message) swapFailure = me
 Talents:HandleEvent("CONFIG_COMMIT_FAILED")
 check(swapFailure == LuckyLoadouts.Strings.SWAP_FAILED and Talents.GetBlocker() == nil,
     "an interrupted swap reports and can be tried again")
+
+-- Creating a loadout from a talent string.
+local Loadouts = LuckyLoadouts.Loadouts
+local importedLoadouts = {}
+local createStartedWithRanks
+local importEntries = { { nodeID = 11, ranksPurchased = 2, selectionEntryID = 1 } }
+LOADOUT_ERROR_BAD_STRING = "bad string"
+configInfo[activeConfigID] = { name = "Active", treeIDs = { 77 } }
+ExportUtil = { MakeImportDataStream = function(text) return { text = text } end }
+C_Traits.GetLoadoutSerializationVersion = function() return 2 end
+C_ClassTalents.ImportLoadout = function(configID, entries, name)
+    importedLoadouts[#importedLoadouts + 1] = { configID = configID, entries = entries, name = name }
+    return true
+end
+PlayerSpellsFrame = { TalentsFrame = {
+    IsInspecting = function() return false end,
+    SetSelectedSavedConfigID = function() end,
+    OnTraitConfigCreateStarted = function(_, hasRanks) createStartedWithRanks = hasRanks end,
+    ReadLoadoutHeader = function(_, stream) return stream.text ~= "bad", 2, 101, { 0 } end,
+    IsHashEmpty = function() return true end,
+    ReadLoadoutContent = function() return {} end,
+    ConvertToImportLoadoutEntryInfo = function() return importEntries end,
+} }
+
+check(Loadouts:Create("Imported", "  ABC  ") and importedLoadouts[1].name == "Imported"
+        and importedLoadouts[1].configID == activeConfigID and createStartedWithRanks == true,
+    "a new loadout with a string is made through Blizzard's import API")
+local badOK, badErr = Loadouts:Create("Imported", "bad")
+check(not badOK and badErr == LOADOUT_ERROR_BAD_STRING and #importedLoadouts == 1, "a bad string makes nothing")
+PlayerSpellsFrame = nil
 
 print(string.format("LoadoutsTest: %d/%d assertions passed", passed, tests))

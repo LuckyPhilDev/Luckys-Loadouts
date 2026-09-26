@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Import strings** Paste a talent import string when creating a new loadout to start it with those talents.
+
 ## [1.2.0] - 2026-09-24
 
 ### Added
