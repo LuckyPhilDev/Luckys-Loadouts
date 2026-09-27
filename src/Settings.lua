@@ -102,8 +102,8 @@ local function setStatus(text, message, errorState)
 end
 
 local function assignedName(configID, byID)
-    if not configID then return S.NONE end
-    return byID[configID] and byID[configID].name or (S.UNAVAILABLE .. ", " .. S.OVERRIDE_INVALID)
+    local loadout = configID and byID[configID]
+    return loadout and loadout.name or S.NONE
 end
 
 local MANAGER_WIDTH = 230
@@ -795,8 +795,9 @@ local function refreshSeason(data, byID)
         tile:SetPoint("TOPLEFT", DIALOG_PAD + column * (TILE_WIDTH + TILE_GAP), -(top + line * (TILE_HEIGHT + TILE_GAP)))
         setTileArt(tile, art, portrait)
         tile.name:SetText(title)
-        tile.loadout:SetText(configID and assignedName(configID, byID) or "")
-        local border = configID and C.goldAccent or C.borderDark
+        local assigned = configID and byID[configID]
+        tile.loadout:SetText(assigned and assigned.name or "")
+        local border = assigned and C.goldAccent or C.borderDark
         tile:SetBackdropBorderColor(border[1], border[2], border[3])
         tile.title, tile.assign, tile.talents, tile.talentList = title, assign, talents, talentList
         placeTileIcons(tile, talents)
