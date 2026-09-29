@@ -19,7 +19,7 @@ Install through CurseForge, or copy `Luckys_Loadouts` into your World of Warcraf
 
 1. Create saved loadouts in Blizzard's Talents window.
 2. Open the Talents window, or click the minimap button, to see the loadout manager beside it.
-3. Click the Assign button to choose a loadout for each content type, season dungeon, and raid boss. Right-click a dungeon or boss to pick its talents, and rank the talents you would give up.
+3. Click the Assign button, or right-click a loadout and pick Assign, to choose a loadout for each content type, season dungeon, and raid boss. Right-click a dungeon or boss to pick its talents, and rank the talents you would give up.
 4. Use Switch on a reminder to change loadout, and Swap or Manual to take missing talents.
 
 ## Slash Commands
