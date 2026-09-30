@@ -251,16 +251,6 @@ local function confirmDelete(entry)
     StaticPopup_Show("LUCKY_LOADOUTS_DELETE", nil, nil, entry.id)
 end
 
-local function showRowMenu(owner, entry)
-    MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
-        rootDescription:CreateTitle(entry.name)
-        rootDescription:CreateButton(S.RENAME, function() showRename(entry) end)
-        rootDescription:CreateButton(S.ASSIGN, function() showAssignments() end)
-        rootDescription:CreateDivider()
-        rootDescription:CreateButton(S.DELETE, function() confirmDelete(entry) end)
-    end)
-end
-
 -- The gap between rows the cursor is nearest, 1 being above the first row.
 local function dropSlot()
     local _, cursorY = GetCursorPosition()
@@ -845,6 +835,63 @@ local function refreshSeason(data, byID)
     for index = #raids + 1, #raidHeaders do raidHeaders[index]:Hide() end
     for index = used + 1, #tiles do tiles[index]:Hide() end
     fitAssignments(top + DIALOG_PAD)
+end
+
+-- Every situation the Assign window offers, ticked where this loadout holds it.
+local function addAssignMenu(rootDescription, entry)
+    local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
+    local data = specID and LuckyLoadouts.GetSpecAssignments(charDB, specID)
+    if not data then return end
+    local Reminders = LuckyLoadouts.Reminders
+    local assignMenu = rootDescription:CreateButton(S.ASSIGN)
+    local function addToggle(menu, label, current, set)
+        menu:CreateCheckbox(label, function() return current() == entry.id end, function()
+            local loadout = current() ~= entry.id and entry or nil
+            set(loadout and loadout.id)
+            reportAssignment(loadout, label)
+        end)
+    end
+    local function instanceEntry(instance)
+        local stored = data.instances[instance.id]
+        return type(stored) == "table" and stored or {}
+    end
+
+    for _, category in ipairs(CATEGORY_ORDER) do
+        addToggle(assignMenu, S.CATEGORIES[category],
+            function() return data.categories[category] end,
+            function(configID) Reminders:SetCategory(specID, category, configID) end)
+    end
+    assignMenu:CreateDivider()
+    local dungeonMenu
+    for _, instance in ipairs(LuckyLoadouts.Journal.Season()) do
+        if instance.category == "Raid" then
+            local raidMenu = assignMenu:CreateButton(instance.label)
+            for _, boss in ipairs(LuckyLoadouts.Journal.Bosses(instance.journalID)) do
+                addToggle(raidMenu, boss.name,
+                    function()
+                        local bosses = instanceEntry(instance).bosses
+                        local assigned = type(bosses) == "table" and bosses[boss.encounterID]
+                        return type(assigned) == "table" and assigned.configID or nil
+                    end,
+                    function(configID) Reminders:SetInstanceAssignment(specID, instance, boss, configID) end)
+            end
+        else
+            dungeonMenu = dungeonMenu or assignMenu:CreateButton(S.DUNGEONS)
+            addToggle(dungeonMenu, instance.label,
+                function() return instanceEntry(instance).configID end,
+                function(configID) Reminders:SetInstanceAssignment(specID, instance, nil, configID) end)
+        end
+    end
+end
+
+local function showRowMenu(owner, entry)
+    MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+        rootDescription:CreateTitle(entry.name)
+        rootDescription:CreateButton(S.RENAME, function() showRename(entry) end)
+        addAssignMenu(rootDescription, entry)
+        rootDescription:CreateDivider()
+        rootDescription:CreateButton(S.DELETE, function() confirmDelete(entry) end)
+    end)
 end
 
 local REMINDER_WIDTH = 420

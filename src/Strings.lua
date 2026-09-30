@@ -72,6 +72,7 @@ LuckyLoadouts.Strings = {
     ASSIGNMENTS = "Assignments",
     CATEGORY_DEFAULTS = "CATEGORY DEFAULTS",
     DUNGEONS_HEADER = "DUNGEONS",
+    DUNGEONS = "Dungeons",
     INSTANCE_INVALID = "Enter a dungeon or raid before using this action.",
     INSTANCE_UNKNOWN = "Current instance data is not ready.",
     ASSIGNED = "Assigned %s to %s.",
