@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts C_RaidLocks RequestRaidInfo
+-- luacheck: globals LuckyLoadouts LuckyInstance C_RaidLocks RequestRaidInfo
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Reminders = {}
@@ -12,14 +12,6 @@ local latestSnapshot
 local visitKills = {}
 local visitRaid
 local categories = { Dungeon = true, Raid = true, Battleground = true, Arena = true, OpenWorld = true, Delve = true }
-
-local function activeDelveState()
-    -- Unverified: confirm C_PartyInfo.IsDelveInProgress inside and outside a retail delve.
-    if not C_PartyInfo or not C_PartyInfo.IsDelveInProgress then return nil end
-    local ok, active = pcall(C_PartyInfo.IsDelveInProgress)
-    if not ok or active == nil then return nil end
-    return active and true or false
-end
 
 local function snapshotKey(category, instanceID)
     return category .. ":" .. tostring(instanceID or 0)
@@ -43,37 +35,26 @@ local function nextBosses(instanceID, difficultyID)
         LuckyLoadouts.Constants.RAID_LAYOUTS[journalID], isKilled)
 end
 
-function Reminders.ClassifyContent()
-    local inInstance, instanceType = IsInInstance()
-    if inInstance == nil then return nil, S.UNKNOWN_CONTENT end
+local CATEGORY_BY_KIND = {
+    raid = "Raid", dungeon = "Dungeon", mythicplus = "Dungeon", delve = "Delve",
+    battleground = "Battleground", arena = "Arena",
+}
 
-    if not inInstance then
+function Reminders.ClassifyContent()
+    local kind, info = LuckyInstance.Current()
+    if kind == "openworld" then
         local mapID = C_Map.GetBestMapForUnit("player")
         if not mapID then return nil, S.UNKNOWN_CONTENT end
         return { category = "OpenWorld", uiMapID = mapID, label = S.CATEGORIES.OpenWorld,
             key = "OpenWorld" }
     end
 
-    local name, infoType, difficultyID, _, _, _, _, instanceID = GetInstanceInfo()
-    instanceType = infoType and infoType ~= "" and infoType or instanceType
-    if type(name) ~= "string" or name == "" or type(instanceID) ~= "number" then
-        return nil, S.UNKNOWN_CONTENT
-    end
-
-    local delve = activeDelveState()
-    if delve == true then
-        return { category = "Delve", instanceID = instanceID, label = name,
-            key = snapshotKey("Delve", instanceID) }
-    end
-    if instanceType == "scenario" and delve == nil then return nil, S.DELVE_UNKNOWN end
-
-    local byType = { party = "Dungeon", raid = "Raid", pvp = "Battleground", arena = "Arena" }
-    local category = byType[instanceType]
+    local category = CATEGORY_BY_KIND[kind]
     if not category then return nil, S.UNKNOWN_CONTENT end
-    local snapshot = { category = category, instanceID = instanceID, label = name,
-        key = snapshotKey(category, instanceID) }
+    local snapshot = { category = category, instanceID = info.instanceID, label = info.name,
+        key = snapshotKey(category, info.instanceID) }
     if category == "Raid" then
-        snapshot.bosses = nextBosses(instanceID, difficultyID)
+        snapshot.bosses = nextBosses(info.instanceID, info.difficultyID)
         -- A kill that opens new bosses is a new visit, so a dismissed reminder can return.
         for _, boss in ipairs(snapshot.bosses or {}) do
             snapshot.key = snapshot.key .. ":" .. tostring(boss.encounterID)

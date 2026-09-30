@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin Enum C_Timer C_ClassTalents C_Traits C_Map C_PartyInfo ExportUtil
+-- luacheck: globals LuckyLoadouts PlayerSpellsFrame TalentFrameBaseMixin Enum C_Timer C_ClassTalents C_Traits C_Map ExportUtil
 -- luacheck: globals GetSpecialization GetSpecializationInfo InCombatLockdown IsInInstance GetInstanceInfo CreateFrame
 -- luacheck: globals LOADOUT_ERROR_BAD_STRING
 -- luacheck: globals C_RaidLocks EJ_GetInstanceForMap EJ_SelectInstance EJ_GetEncounterInfoByIndex EJ_GetCreatureInfo
@@ -103,7 +103,6 @@ C_Traits = {
     end,
 }
 C_Map = { GetBestMapForUnit = function() return mapID end }
-C_PartyInfo = { IsDelveInProgress = function() return false end }
 function GetSpecialization() return 1 end
 function GetSpecializationInfo() return currentSpecID, currentSpecID == 101 and "First" or "Second" end
 function InCombatLockdown() return inCombat end
@@ -123,6 +122,7 @@ local function runTimers()
     for _, timer in ipairs(pending) do timer.fn() end
 end
 
+dofile(root .. "../Luckys_Utils/LuckyInstance.lua")
 dofile(root .. "src/Strings.lua")
 dofile(root .. "src/Constants.lua")
 dofile(root .. "src/Defaults.lua")
@@ -541,11 +541,19 @@ function EJ_GetEncounterInfoByIndex(index)
     return boss.name, nil, boss.encounterID, nil, nil, nil, boss.dungeonEncounterID
 end
 local realGetInstanceInfo = GetInstanceInfo
+instanceTypeState = "raid"
 function GetInstanceInfo() return "The Voidspire", "raid", 16, "Mythic", 20, false, false, 2900 end
 local raidSnapshot = LuckyLoadouts.Reminders.ClassifyContent()
 check(raidSnapshot.category == "Raid" and #raidSnapshot.bosses == 2
         and raidSnapshot.key == "Raid:2900:2734:2736",
     "a raid snapshot carries the next bosses, and a new set of them makes a new visit")
+instanceTypeState = "scenario"
+function GetInstanceInfo() return "Tidebound Grotto", "scenario", 1, "Normal", 5, false, false, 3001 end
+check(LuckyLoadouts.Reminders.ClassifyContent() == nil,
+    "a scenario that is not the Delves difficulty is not a delve")
+function GetInstanceInfo() return "Fungal Folly", "scenario", 208, "Delves", 5, false, false, 2664 end
+check(LuckyLoadouts.Reminders.ClassifyContent().category == "Delve", "the Delves difficulty is a delve")
+instanceTypeState = "party"
 GetInstanceInfo = realGetInstanceInfo
 
 local raidData = LuckyLoadouts.GetSpecAssignments(characterDB, 101)

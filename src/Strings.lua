@@ -110,7 +110,6 @@ LuckyLoadouts.Strings = {
     DEV_OFF = "Debug mode disabled.",
     DEV_NO_REMINDER = "No reminder here: no assignment for this zone, or you are already on it.",
     UNKNOWN_CONTENT = "Content could not be identified.",
-    DELVE_UNKNOWN = "Delve detection is unavailable on this client.",
     NO_SITUATION = "No situation assigned",
     SITUATIONS = {
         Dungeon = "Dungeons",
