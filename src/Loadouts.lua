@@ -408,6 +408,19 @@ function Loadouts:Create(name, importText)
     return true
 end
 
+function Loadouts:Export(configID)
+    local ok, text = pcall(C_Traits.GenerateImportString, configID)
+    if not ok or trim(text or "") == "" then return nil, S.EXPORT_FAILED end
+    return text
+end
+
+-- Blizzard has no copy API, so a duplicate is the loadout's own export string imported under a new name.
+function Loadouts:Duplicate(configID, name)
+    local text, err = self:Export(configID)
+    if not text then return false, err end
+    return self:Create(name, text)
+end
+
 function Loadouts:Delete(configID)
     local specID = currentSpec()
     if not specID then return false, S.NO_SPEC end

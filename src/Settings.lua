@@ -364,9 +364,12 @@ local function createRenameDialog()
     placeButtonPair(renameDialog, renameSave, cancel)
     cancel:SetScript("OnClick", function() renameDialog:Hide() end)
     renameSave:SetScript("OnClick", function()
+        if dialogMode == "export" then return renameDialog:Hide() end
         local ok, err
         if dialogMode == "rename" then
             ok, err = LuckyLoadouts.Loadouts:Rename(renameTarget, renameEdit:GetText())
+        elseif dialogMode == "duplicate" then
+            ok, err = LuckyLoadouts.Loadouts:Duplicate(renameTarget, renameEdit:GetText())
         else
             ok, err = LuckyLoadouts.Loadouts:Create(renameEdit:GetText(), importEdit:GetText())
         end
@@ -406,6 +409,18 @@ end
 function showCreate()
     renameTarget = nil
     openDialog("create", S.CREATE_TITLE, S.CREATE_PROMPT, S.CREATE, S.NEW_LOADOUT_NAME)
+end
+
+local function showDuplicate(entry)
+    renameTarget = entry.id
+    openDialog("duplicate", S.DUPLICATE_TITLE, S.CREATE_PROMPT, S.CREATE, string.format(S.DUPLICATE_NAME, entry.name))
+end
+
+local function showExport(entry)
+    local text, err = LuckyLoadouts.Loadouts:Export(entry.id)
+    if not text then return setStatus(managerStatus, err, true) end
+    renameTarget = nil
+    openDialog("export", entry.name, S.EXPORT_PROMPT, S.DISMISS, text)
 end
 
 local function showLoadoutPicker(owner, list, onSelect)
@@ -888,6 +903,8 @@ local function showRowMenu(owner, entry)
     MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
         rootDescription:CreateTitle(entry.name)
         rootDescription:CreateButton(S.RENAME, function() showRename(entry) end)
+        rootDescription:CreateButton(S.DUPLICATE, function() showDuplicate(entry) end)
+        rootDescription:CreateButton(S.EXPORT, function() showExport(entry) end)
         addAssignMenu(rootDescription, entry)
         rootDescription:CreateDivider()
         rootDescription:CreateButton(S.DELETE, function() confirmDelete(entry) end)
