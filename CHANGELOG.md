@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2] - 2026-10-02
+
+### Added
+
+- **Duplicate** Right-click a loadout in the loadout manager and Duplicate makes a copy of it under a name you choose.
+- **Export** Right-click a loadout in the loadout manager and Export shows its loadout string to copy, the same one Blizzard's Share gives you.
+
 ## [1.3.1] - 2026-10-02
 
 ### Improved
