@@ -787,6 +787,18 @@ check(Loadouts:Create("Imported", "  ABC  ") and importedLoadouts[1].name == "Im
     "a new loadout with a string is made through Blizzard's import API")
 local badOK, badErr = Loadouts:Create("Imported", "bad")
 check(not badOK and badErr == LOADOUT_ERROR_BAD_STRING and #importedLoadouts == 1, "a bad string makes nothing")
+
+local written
+ExportUtil.MakeExportDataStream = function() return { GetExportString = function() return "EXPORTED" end } end
+C_Traits.GetTreeHash = function() return { 0 } end
+PlayerSpellsFrame.TalentsFrame.WriteLoadoutHeader = function() end
+PlayerSpellsFrame.TalentsFrame.WriteLoadoutContent = function(_, _, configID, treeID)
+    written = { configID = configID, treeID = treeID }
+end
+selectedID = 1
+check(Loadouts:Export(1) == "EXPORTED" and written.configID == activeConfigID and written.treeID == 77,
+    "the loaded loadout exports from the active config, as Share does")
+check(Loadouts:Export(2) == "EXPORTED" and written.configID == 2, "another loadout exports from its own config")
 PlayerSpellsFrame = nil
 
 print(string.format("LoadoutsTest: %d/%d assertions passed", passed, tests))

@@ -408,8 +408,24 @@ function Loadouts:Create(name, importText)
     return true
 end
 
+-- Written with the talent frame's own serializer, the one behind Share, because
+-- C_Traits.GenerateImportString gives a different string for the same loadout.
 function Loadouts:Export(configID)
-    local ok, text = pcall(C_Traits.GenerateImportString, configID)
+    local talents = talentFrame()
+    local specID = currentSpec()
+    local activeID = C_ClassTalents.GetActiveConfigID()
+    local config = activeID and C_Traits.GetConfigInfo(activeID)
+    local treeID = config and config.treeIDs and config.treeIDs[1]
+    if not talents or not talents.WriteLoadoutHeader or not specID or not treeID then return nil, S.EXPORT_FAILED end
+    -- The loaded loadout lives in the active config, which is what Share reads.
+    if configID == C_ClassTalents.GetLastSelectedSavedConfigID(specID) then configID = activeID end
+
+    local ok, text = pcall(function()
+        local stream = ExportUtil.MakeExportDataStream()
+        talents:WriteLoadoutHeader(stream, C_Traits.GetLoadoutSerializationVersion(), specID, C_Traits.GetTreeHash(treeID))
+        talents:WriteLoadoutContent(stream, configID, treeID)
+        return stream:GetExportString()
+    end)
     if not ok or trim(text or "") == "" then return nil, S.EXPORT_FAILED end
     return text
 end
