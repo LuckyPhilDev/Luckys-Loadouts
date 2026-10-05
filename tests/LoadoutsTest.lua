@@ -2,6 +2,7 @@
 -- luacheck: globals GetSpecialization GetSpecializationInfo InCombatLockdown IsInInstance GetInstanceInfo CreateFrame
 -- luacheck: globals LOADOUT_ERROR_BAD_STRING
 -- luacheck: globals C_RaidLocks EJ_GetInstanceForMap EJ_SelectInstance EJ_GetEncounterInfoByIndex EJ_GetCreatureInfo
+-- luacheck: globals GetServerExpansionLevel EJ_GetNumTiers EJ_GetCurrentTier EJ_SelectTier EJ_GetInstanceByIndex EJ_GetInstanceInfo
 
 local script = arg[0]:gsub("\\", "/")
 local root = script:match("^(.*)/tests/[^/]+$") .. "/"
@@ -108,6 +109,28 @@ function GetSpecializationInfo() return currentSpecID, currentSpecID == 101 and 
 function InCombatLockdown() return inCombat end
 function IsInInstance() return inInstanceState, instanceTypeState end
 function GetInstanceInfo() return "Test Dungeon", "party", 1, "Normal", 5, false, false, 42 end
+-- Tier 12 is the current expansion with The Voidspire; tier 13 the season,
+-- which brings back an older dungeon (mapID 1001) but not another (1002).
+-- Test Dungeon (42) is current.
+local selectedTier
+local TIER_INSTANCES = {
+    [12] = { raid = { 1307 }, party = { 600 } },
+    [13] = { raid = { 1307 }, party = { 501 } },
+    [11] = { raid = {}, party = { 501, 502 } },
+}
+local JOURNAL_MAPS = { [1307] = { "The Voidspire", true, 2900 }, [501] = { "Old", false, 1001 },
+    [502] = { "Older", false, 1002 }, [600] = { "Test Dungeon", false, 42 } }
+function GetServerExpansionLevel() return 11 end
+function EJ_GetNumTiers() return 13 end
+function EJ_GetCurrentTier() return selectedTier end
+function EJ_SelectTier(tier) selectedTier = tier end
+function EJ_GetInstanceByIndex(index, isRaid)
+    return TIER_INSTANCES[selectedTier][isRaid and "raid" or "party"][index]
+end
+function EJ_GetInstanceInfo(journalID)
+    local map = JOURNAL_MAPS[journalID]
+    return map[1], nil, nil, nil, nil, nil, nil, nil, nil, map[3], nil, map[2]
+end
 function CreateFrame()
     local frame = { events = {} }
     function frame:RegisterEvent(event) self.events[event] = true end
@@ -540,11 +563,21 @@ function EJ_GetEncounterInfoByIndex(index)
     if not boss then return nil end
     return boss.name, nil, boss.encounterID, nil, nil, nil, boss.dungeonEncounterID
 end
+check(LuckyLoadouts.Journal.IsCurrent(2900) and LuckyLoadouts.Journal.IsCurrent(1001)
+        and not LuckyLoadouts.Journal.IsCurrent(1002),
+    "current content is the expansion's tier plus the season, not older instances")
+local legacyController = LuckyLoadouts.Reminders.CreateController({
+    getAssignments = function() return { categories = { Dungeon = 2 }, instances = {} } end,
+    getLoadouts = function() return byID, 1 end,
+})
+check(legacyController:NextStep({ category = "Dungeon", instanceID = 1002, key = "Dungeon:1002", legacy = true }, 101)
+        == nil, "an older dungeon prompts nothing")
+
 local realGetInstanceInfo = GetInstanceInfo
 instanceTypeState = "raid"
 function GetInstanceInfo() return "The Voidspire", "raid", 16, "Mythic", 20, false, false, 2900 end
 local raidSnapshot = LuckyLoadouts.Reminders.ClassifyContent()
-check(raidSnapshot.category == "Raid" and #raidSnapshot.bosses == 2
+check(raidSnapshot.category == "Raid" and not raidSnapshot.legacy and #raidSnapshot.bosses == 2
         and raidSnapshot.key == "Raid:2900:2734:2736",
     "a raid snapshot carries the next bosses, and a new set of them makes a new visit")
 instanceTypeState = "scenario"
@@ -553,6 +586,9 @@ check(LuckyLoadouts.Reminders.ClassifyContent() == nil,
     "a scenario that is not the Delves difficulty is not a delve")
 function GetInstanceInfo() return "Fungal Folly", "scenario", 208, "Delves", 5, false, false, 2664 end
 check(LuckyLoadouts.Reminders.ClassifyContent().category == "Delve", "the Delves difficulty is a delve")
+instanceTypeState = "party"
+function GetInstanceInfo() return "Older", "party", 1, "Normal", 5, false, false, 1002 end
+check(LuckyLoadouts.Reminders.ClassifyContent().legacy, "a dungeon from an older expansion is legacy")
 instanceTypeState = "party"
 GetInstanceInfo = realGetInstanceInfo
 

@@ -53,6 +53,9 @@ function Reminders.ClassifyContent()
     if not category then return nil, S.UNKNOWN_CONTENT end
     local snapshot = { category = category, instanceID = info.instanceID, label = info.name,
         key = snapshotKey(category, info.instanceID) }
+    if category == "Dungeon" or category == "Raid" then
+        snapshot.legacy = not LuckyLoadouts.Journal.IsCurrent(info.instanceID)
+    end
     if category == "Raid" then
         snapshot.bosses = nextBosses(info.instanceID, info.difficultyID)
         -- A kill that opens new bosses is a new visit, so a dismissed reminder can return.
@@ -198,6 +201,7 @@ function Reminders.CreateController(callbacks)
     -- The loadout comes first; talents only once it is right or dismissed, so
     -- they are checked against the tree the player will actually play.
     function state:NextStep(snapshot, specID)
+        if snapshot.legacy then return nil end
         local assignments = self.callbacks.getAssignments(specID)
         local revision = self.revisions[specID] or 0
         local function unseen(identity) return identity == self.visibleKey or not self.shown[identity] end

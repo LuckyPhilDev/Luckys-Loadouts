@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts
+-- luacheck: globals LuckyLoadouts GetServerExpansionLevel
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Journal = {}
@@ -13,6 +13,20 @@ function Journal.Instance(journalID)
     return { id = mapID, journalID = journalID, label = name, art = art, category = isRaid and "Raid" or "Dungeon" }
 end
 
+local function addTierInstances(tier, found)
+    local excluded = LuckyLoadouts.Constants.SEASON_GROUPING_PAGES
+    EJ_SelectTier(tier)
+    for _, isRaid in ipairs({ true, false }) do
+        for index = 1, 100 do
+            local journalID = EJ_GetInstanceByIndex(index, isRaid)
+            if not journalID then break end
+            local instance = not excluded[journalID] and Journal.Instance(journalID)
+            if instance then found[#found + 1] = instance end
+        end
+    end
+    return found
+end
+
 local season
 
 -- The Adventure Guide's last tier is Current Season; before a season opens it
@@ -21,23 +35,32 @@ local season
 function Journal.Season()
     if season then return season end
     local previous = EJ_GetCurrentTier()
-    local excluded = LuckyLoadouts.Constants.SEASON_GROUPING_PAGES
     local found = {}
     for tier = EJ_GetNumTiers(), 1, -1 do
-        EJ_SelectTier(tier)
-        for _, isRaid in ipairs({ true, false }) do
-            for index = 1, 100 do
-                local journalID = EJ_GetInstanceByIndex(index, isRaid)
-                if not journalID then break end
-                local instance = not excluded[journalID] and Journal.Instance(journalID)
-                if instance then found[#found + 1] = instance end
-            end
-        end
+        addTierInstances(tier, found)
         if #found > 0 then break end
     end
     if previous then EJ_SelectTier(previous) end
     if #found > 0 then season = found end
     return found
+end
+
+local current
+
+-- The current expansion's tier plus the season, which can bring back older
+-- dungeons. Journal tiers start at Classic, so the expansion's tier is its level + 1.
+-- An unloaded journal finds nothing, and then everything counts as current.
+function Journal.IsCurrent(instanceID)
+    if not current then
+        local previous = EJ_GetCurrentTier()
+        local found = addTierInstances(GetServerExpansionLevel() + 1, {})
+        if previous then EJ_SelectTier(previous) end
+        if #found == 0 then return true end
+        for _, instance in ipairs(Journal.Season()) do found[#found + 1] = instance end
+        current = {}
+        for _, instance in ipairs(found) do current[instance.id] = true end
+    end
+    return current[instanceID] == true
 end
 
 local bossesByInstance = {}
