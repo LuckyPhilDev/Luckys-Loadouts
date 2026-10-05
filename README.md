@@ -7,7 +7,7 @@ Pick existing Blizzard talent loadouts and get reminders when your content chang
 - **Loadout manager** A panel on the side of the Talents window to switch, create, rename, duplicate, and delete saved loadouts for your current specialization. Paste an import string when creating one to start it with those talents, or right-click a loadout and choose Export to copy its loadout string. Drag loadouts to put them in the order you want.
 - **Content assignments** Set defaults for dungeons, raids, battlegrounds, arenas, open world, and delves.
 - **Dungeon and raid boss loadouts** Give each of this season's dungeons, and each raid boss, its own loadout, picked from Adventure Guide tiles.
-- **Content reminders** Get one dismissible reminder per visit when another loadout is assigned. In a raid, the reminder follows your kills and suggests the loadout for the bosses you can pull next.
+- **Content reminders** Get one dismissible reminder per visit when another loadout is assigned. Dungeons and raids from older expansions stay quiet. In a raid, the reminder follows your kills and suggests the loadout for the bosses you can pull next.
 - **Talent reminders** Pick talents you want for a dungeon or raid boss straight from your talent tree. Once you are on the right loadout, the reminder shows any you are missing beside the dungeon or boss art.
 - **Talent swap** Rank the talents you are happy to give up, and Swap makes room for the missing ones on your active talents without touching your saved loadout. Manual opens your tree with the missing talents marked so you can choose yourself.
 

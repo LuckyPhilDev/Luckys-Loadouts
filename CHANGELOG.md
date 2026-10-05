@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.3] - 2026-10-05
+
+### Improved
+
+- **Current content only** Dungeons and raids from older expansions no longer prompt a loadout reminder. Older dungeons that are back in this season's rotation still do.
+
+### Fixed
+
+- Switching between settings pages no longer freezes the game. (Thanks for the report Tuulani)
+- Right-clicking the minimap button during combat now opens the settings once combat ends instead of being blocked.
+
 ## [1.3.2] - 2026-10-02
 
 ### Added
