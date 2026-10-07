@@ -1,5 +1,6 @@
 ## Interface: 120100
 ## Title: Lucky's Loadouts
+## IconTexture: Interface\AddOns\Luckys_Loadouts\media\icon
 ## Notes: Loadout assignments and content reminders.
 ## Version: 1.3.3
 ## Author: Lucky Phil

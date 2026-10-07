@@ -41,7 +41,7 @@ local function initialize()
         name = "LuckyLoadoutsMinimapButton",
         tocname = ADDON_NAME,
         text = S.ADDON_NAME,
-        icon = 136129,
+        icon = "Interface\\AddOns\\Luckys_Loadouts\\media\\icon",
         dbKey = "minimap",
         db = LuckyLoadoutsDB,
         defaultAngle = 245,
