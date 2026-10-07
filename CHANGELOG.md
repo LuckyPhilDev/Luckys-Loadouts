@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.4] - 2026-10-07
 
 ### Added
 - **More from Lucky Phil** The row at the bottom of the What's New page now includes Lucky's Actionbars, with a CurseForge link.
