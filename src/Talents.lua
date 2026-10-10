@@ -14,6 +14,7 @@ local bannerCancel
 local spots = {}
 local pick
 local highlighted
+local previewing
 local TIMEOUT_SECONDS = 12
 -- The ring copies the talent's own border, so it is a circle, square or
 -- octagon to match, drawn outside it. Cyan because the tree already uses
@@ -499,7 +500,7 @@ local function createOverlay(talents)
         -- so it does not come back over the tree once picking has ended.
         overlay:Hide()
         local done = pick and pick.onDone
-        pick, highlighted = nil, nil
+        pick, highlighted, previewing = nil, nil, nil
         if done then done() end
     end)
 end
@@ -507,8 +508,13 @@ end
 -- Talent buttons exist only once the tab has drawn, so wait a frame after opening it.
 -- Unverified: EnumerateAllTalentButtons and GetNodeID on the retail talent frame.
 local function showOverlay(interactive)
-    if PlayerSpellsUtil and PlayerSpellsUtil.OpenToClassTalentsTab then PlayerSpellsUtil.OpenToClassTalentsTab() end
+    local open = talentsFrame()
+    if not (open and open:IsVisible()) and PlayerSpellsUtil and PlayerSpellsUtil.OpenToClassTalentsTab then
+        PlayerSpellsUtil.OpenToClassTalentsTab()
+    end
     C_Timer.After(0, function()
+        -- Ended before the frame came round, as a preview does when the cursor moves on.
+        if not pick and not highlighted then return end
         local talents = talentsFrame()
         if not talents or not talents.EnumerateAllTalentButtons then return end
         if not overlay then createOverlay(talents) end
@@ -555,6 +561,46 @@ function Talents.PointOut(take, giveUp)
     for _, talent in ipairs(giveUp or {}) do highlighted[talent.nodeID] = "giveUp" end
     for _, talent in ipairs(take) do highlighted[talent.nodeID] = "take" end
     showOverlay(false)
+end
+
+local function chosen(info)
+    local rank = info and info.ranksPurchased or 0
+    return rank, rank > 0 and info.activeEntry and info.activeEntry.entryID
+end
+
+-- What loading a saved loadout would add or switch sides on, and what it would
+-- drop, against the active talents. Ranks granted for free are the same in both.
+function Talents.Diff(configID)
+    local activeID = C_ClassTalents.GetActiveConfigID()
+    local config = activeID and C_Traits.GetConfigInfo(activeID)
+    local treeID = config and config.treeIDs and config.treeIDs[1]
+    local gain, lose = {}, {}
+    for _, nodeID in ipairs(treeID and C_Traits.GetTreeNodes(treeID) or {}) do
+        local nowRank, nowEntry = chosen(nodeInfo(activeID, nodeID))
+        local savedRank, savedEntry = chosen(nodeInfo(configID, nodeID))
+        if savedRank > nowRank or (nowRank > 0 and savedRank > 0 and savedEntry ~= nowEntry) then
+            gain[#gain + 1] = { nodeID = nodeID }
+        elseif savedRank < nowRank then
+            lose[#lose + 1] = { nodeID = nodeID }
+        end
+    end
+    return gain, lose
+end
+
+-- Marks a saved loadout's changes on the open tree until EndPreview. Never
+-- opens the tree or covers a pick or a PointOut already on it.
+function Talents.Preview(configID)
+    local talents = talentsFrame()
+    if pick or highlighted or not (talents and talents:IsVisible()) then return end
+    local gain, lose = Talents.Diff(configID)
+    previewing = true
+    Talents.PointOut(gain, lose)
+end
+
+function Talents.EndPreview()
+    if not previewing then return end
+    previewing, highlighted = nil, nil
+    if overlay then overlay:Hide() end
 end
 
 function Talents:Init()

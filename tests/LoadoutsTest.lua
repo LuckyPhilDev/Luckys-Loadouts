@@ -145,7 +145,7 @@ local function runTimers()
     for _, timer in ipairs(pending) do timer.fn() end
 end
 
-dofile(root .. "../Luckys_Utils/LuckyInstance.lua")
+dofile(root .. "../LuckyUtils/LuckyInstance.lua")
 dofile(root .. "src/Strings.lua")
 dofile(root .. "src/Constants.lua")
 dofile(root .. "src/Defaults.lua")
@@ -794,6 +794,25 @@ check(Talents.Swap({ soothe }, { roar }, nil, function(message) swapFailure = me
 Talents:HandleEvent("CONFIG_COMMIT_FAILED")
 check(swapFailure == LuckyLoadouts.Strings.SWAP_FAILED and Talents.GetBlocker() == nil,
     "an interrupted swap reports and can be tried again")
+
+-- Previewing a saved loadout against the active talents.
+local saved = {
+    [10] = { ID = 10, ranksPurchased = 1, activeEntry = { entryID = 101 } },
+    [30] = { ID = 30, ranksPurchased = 1, activeEntry = { entryID = 302 } },
+    [40] = { ID = 40, ranksPurchased = 1, activeEntry = { entryID = 401 } },
+}
+for _, nodeID in ipairs({ 50, 60, 70, 80 }) do saved[nodeID] = nodes[nodeID] end
+local activeNodeInfo = C_Traits.GetNodeInfo
+C_Traits.GetNodeInfo = function(configID, nodeID)
+    if configID == 5 then return saved[nodeID] or { ID = 0 } end
+    return activeNodeInfo(configID, nodeID)
+end
+configInfo[activeConfigID] = { treeIDs = { 1 } }
+local gain, lose = Talents.Diff(5)
+check(ids(gain) == "10,30" and ids(lose) == "20,40",
+    "a preview gains what the loadout adds or switches sides on and loses what it drops or lowers")
+C_Traits.GetNodeInfo = activeNodeInfo
+configInfo[activeConfigID] = nil
 
 -- Creating a loadout from a talent string.
 local Loadouts = LuckyLoadouts.Loadouts

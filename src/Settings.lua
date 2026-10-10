@@ -301,6 +301,10 @@ local function acquireManagerRow(index)
     row:SetScript("OnMouseDown", function() row.dragged = false end)
     row:SetScript("OnDragStart", startDrag)
     row:SetScript("OnDragStop", stopDrag)
+    row:SetScript("OnEnter", function()
+        if not quickDeleteMode and not dragRow then LuckyLoadouts.Talents.Preview(row.entry.id) end
+    end)
+    row:SetScript("OnLeave", LuckyLoadouts.Talents.EndPreview)
     local hover = row:CreateTexture(nil, "HIGHLIGHT")
     hover:SetAllPoints()
     hover:SetColorTexture(1, 1, 1, 0.06)
@@ -1341,6 +1345,7 @@ function SettingsUI:RefreshManager()
             if button == "RightButton" then
                 showRowMenu(row, rowEntry)
             elseif not blocker then
+                LuckyLoadouts.Talents.EndPreview()
                 LuckyLoadouts.Loadouts:RequestSwitch(rowEntry.id, "manager")
             end
         end)
