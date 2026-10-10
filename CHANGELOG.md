@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.0] - 2026-10-10
 
 ### Added
 - **Talent change preview** Hover a loadout in the manager while the talent tree is open to mark the talents you would gain and the ones you would lose. (Thanks for the suggestion Tuulani)
