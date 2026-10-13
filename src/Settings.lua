@@ -467,6 +467,9 @@ local assignScroll
 local assignContent
 local raidHeaders = {}
 local tiles = {}
+local SEASON_RETRY_LIMIT = 5
+local SEASON_RETRY_SECONDS = 0.5
+local seasonRetries = 0
 
 local function reportAssignment(loadout, name)
     local message = loadout and string.format(S.ASSIGNED, loadout.name, name) or string.format(S.CLEARED, name)
@@ -767,6 +770,7 @@ end
 function showAssignments()
     setStatus(assignStatus, "", false)
     assignDialog:Show()
+    seasonRetries = 0
     SettingsUI:RefreshAssignments()
 end
 
@@ -782,9 +786,20 @@ end
 
 -- Dungeon tiles, then each raid's name heading tiles for its bosses.
 local function refreshSeason(data, byID)
-    local dungeons, raids = {}, {}
+    local dungeons, raids, unanswered = {}, {}, false
     for _, instance in ipairs(LuckyLoadouts.Journal.Season()) do
-        table.insert(instance.category == "Raid" and raids or dungeons, instance)
+        if instance.category ~= "Raid" then
+            dungeons[#dungeons + 1] = instance
+        elseif #LuckyLoadouts.Journal.Bosses(instance.journalID) > 0 then
+            raids[#raids + 1] = instance
+        else
+            unanswered = true
+        end
+    end
+    -- The journal can answer late, so a raid without bosses is asked again shortly.
+    if unanswered and seasonRetries < SEASON_RETRY_LIMIT then
+        seasonRetries = seasonRetries + 1
+        C_Timer.After(SEASON_RETRY_SECONDS, function() SettingsUI:RefreshAssignments() end)
     end
     -- The season's main raid leads; a one-boss raid is a side stop.
     local journalOrder = {}
