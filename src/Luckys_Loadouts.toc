@@ -1,8 +1,8 @@
-## Interface: 120100
+## Interface: 120100, 120105
 ## Title: Lucky's Loadouts
 ## IconTexture: Interface\AddOns\Luckys_Loadouts\media\icon
 ## Notes: Loadout assignments and content reminders.
-## Version: 1.4.0
+## Version: 1.4.1
 ## Author: Lucky Phil
 ## SavedVariables: LuckyLoadoutsDB, LuckySettingsDB, LuckyRosterDB
 ## SavedVariablesPerCharacter: LuckyLoadoutsCharDB
