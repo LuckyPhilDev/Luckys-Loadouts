@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.2] - 2026-10-13
 
 ### Fixed
 - **Assignments** Raids no longer appear without their bosses, or go missing, when the Adventure Guide is slow to load them.
