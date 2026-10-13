@@ -65,17 +65,26 @@ end
 
 local bossesByInstance = {}
 
-function Journal.Bosses(journalID)
-    if bossesByInstance[journalID] then return bossesByInstance[journalID] end
-    EJ_SelectInstance(journalID)
+local function readBosses(instanceArg)
     local bosses = {}
     for index = 1, 50 do
-        local name, _, encounterID, _, _, _, dungeonEncounterID = EJ_GetEncounterInfoByIndex(index, journalID)
+        local name, _, encounterID, _, _, _, dungeonEncounterID = EJ_GetEncounterInfoByIndex(index, instanceArg)
         if not name then break end
         local portrait = select(5, EJ_GetCreatureInfo(1, encounterID))
         bosses[index] = { encounterID = encounterID, dungeonEncounterID = dungeonEncounterID, name = name,
             portrait = portrait or "Interface\\EncounterJournal\\UI-EJ-BOSS-Default" }
     end
+    return bosses
+end
+
+-- An instance the journal has not answered for yet lists no bosses and is not
+-- cached, so a later call reads again. Selected-instance reads come first, the
+-- way the Adventure Guide itself asks.
+function Journal.Bosses(journalID)
+    if bossesByInstance[journalID] then return bossesByInstance[journalID] end
+    EJ_SelectInstance(journalID)
+    local bosses = readBosses(nil)
+    if #bosses == 0 then bosses = readBosses(journalID) end
     if #bosses > 0 then bossesByInstance[journalID] = bosses end
     return bosses
 end
