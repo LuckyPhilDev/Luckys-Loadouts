@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.3] - 2026-10-26
 
 ### Added
 - **Wago Addons** Lucky's Loadouts is now published on Wago Addons too, so you can install and update it with the Wago app.
