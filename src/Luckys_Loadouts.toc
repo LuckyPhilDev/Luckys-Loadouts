@@ -8,6 +8,7 @@
 ## SavedVariablesPerCharacter: LuckyLoadoutsCharDB
 ## OptionalDeps: Luckys_Utils
 ## X-Curse-Project-ID: 1705927
+## X-Wago-ID: aNerJM62
 
 Libs\LuckysUtils\embeds.xml
 Strings.lua
