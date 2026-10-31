@@ -2,3 +2,5 @@
 builds/
 .release/
 src/Libs/
+.claude/worktrees/
+.codex/worktrees/
