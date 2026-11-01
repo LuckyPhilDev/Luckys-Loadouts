@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.4] - 2026-11-01
 
 ### Improved
 - **Loadout reminder** The reminder hides when you enter combat and comes back when combat ends, and a pull no longer sets off a content and talent check.
