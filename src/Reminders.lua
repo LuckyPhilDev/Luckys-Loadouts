@@ -280,6 +280,12 @@ function Reminders.CreateController(callbacks)
     end
 
     function state:CombatChanged(inCombat)
+        if inCombat and self.visible then
+            -- Hide clears visibleKey, so without this NextStep would count the hidden prompt as seen.
+            self.deferred = self.visibleKey
+            self.shown[self.visibleKey] = nil
+            self:Hide()
+        end
         self.callbacks.combatChanged(inCombat)
         if not inCombat and self.deferred then self:ScheduleRefresh(false) end
     end
@@ -356,6 +362,7 @@ function Reminders:Init(db)
             visitKills[encounterID] = true
         elseif event == "PLAYER_REGEN_DISABLED" then
             controller:CombatChanged(true)
+            return
         elseif event == "PLAYER_REGEN_ENABLED" then
             controller:CombatChanged(false)
         end

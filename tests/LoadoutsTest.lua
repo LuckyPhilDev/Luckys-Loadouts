@@ -458,17 +458,19 @@ local visibleCombatController = LuckyLoadouts.Reminders.CreateController({
 })
 visibleCombatController:Evaluate(dungeonA)
 visibleCombatController:CombatChanged(true)
-visibleCombatController:ScheduleRefresh(false)
-runTimers()
-check(visibleCombatShows == 1 and visibleCombatHides == 0 and visibleCombatController.visible ~= nil
+check(visibleCombatShows == 1 and visibleCombatHides == 1 and visibleCombatController.visible == nil
         and combatTransitions[1] == true,
-    "shown reminder survives combat with its switch disabled")
+    "shown reminder is hidden when combat starts")
 visibleCombatController:CombatChanged(false)
-visibleCombatController:ScheduleRefresh(false)
 runTimers()
-check(visibleCombatShows == 1 and visibleCombatHides == 0 and visibleCombatController.visible ~= nil
-        and combatTransitions[2] == false,
-    "shown reminder switch is re-enabled after combat")
+check(visibleCombatShows == 2 and visibleCombatController.visible ~= nil and combatTransitions[2] == false,
+    "reminder hidden by combat reappears after it")
+visibleCombatController:Dismiss()
+visibleCombatController:CombatChanged(true)
+visibleCombatController:CombatChanged(false)
+runTimers()
+check(visibleCombatShows == 2 and visibleCombatController.visible == nil,
+    "dismissed reminder stays dismissed through combat")
 
 local combatShown = {}
 local combatController = LuckyLoadouts.Reminders.CreateController({
