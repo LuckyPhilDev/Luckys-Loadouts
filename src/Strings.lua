@@ -97,6 +97,7 @@ LuckyLoadouts.Strings = {
     GIVE_UP_EMPTY = "None yet. Swap gives these up to make room.",
     SWAP = "Swap",
     OPEN_TALENTS = "Talents",
+    OPEN_TALENTS_FIRST = "Open your Talents window first, then try again.",
     MANUAL = "Manual",
     SWAP_INSTEAD_OF = "instead of",
     SWAP_SPARE = "Uses points already freed",

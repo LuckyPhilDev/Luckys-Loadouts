@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts PlayerSpellsFrame PlayerSpellsUtil GameTooltip_Hide
+-- luacheck: globals LuckyLoadouts PlayerSpellsFrame GameTooltip_Hide
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Talents = {}
@@ -505,13 +505,18 @@ local function createOverlay(talents)
     end)
 end
 
--- Talent buttons exist only once the tab has drawn, so wait a frame after opening it.
+-- Opening the Talents window from addon code taints its tab state, and the
+-- spellbook then refuses to cast, so the player opens it and we only draw on it.
+function Talents.RequireOpenTree()
+    local talents = talentsFrame()
+    if talents and talents:IsVisible() then return true end
+    print(S.PREFIX, S.OPEN_TALENTS_FIRST)
+    return false
+end
+
+-- Talent buttons may not have drawn yet on the frame the tab opened, so wait one.
 -- Unverified: EnumerateAllTalentButtons and GetNodeID on the retail talent frame.
 local function showOverlay(interactive)
-    local open = talentsFrame()
-    if not (open and open:IsVisible()) and PlayerSpellsUtil and PlayerSpellsUtil.OpenToClassTalentsTab then
-        PlayerSpellsUtil.OpenToClassTalentsTab()
-    end
     C_Timer.After(0, function()
         -- Ended before the frame came round, as a preview does when the cursor moves on.
         if not pick and not highlighted then return end
@@ -548,14 +553,17 @@ end
 -- somewhere, "giveUp" for the priority list. getList returns the stored list,
 -- changed in place; onDone runs when picking ends.
 function Talents.StartPick(mode, title, getList, onChange, onDone)
+    if not Talents.RequireOpenTree() then return false end
     if overlay then overlay:Hide() end
     highlighted = nil
     pick = { mode = mode, title = title, getList = getList, onChange = onChange, onDone = onDone }
     showOverlay(true)
+    return true
 end
 
--- Open the talent tree with the talents to take and to give up marked until it closes.
+-- Mark the talents to take and to give up on the open tree until it closes.
 function Talents.PointOut(take, giveUp)
+    if not Talents.RequireOpenTree() then return end
     if overlay then overlay:Hide() end
     highlighted = {}
     for _, talent in ipairs(giveUp or {}) do highlighted[talent.nodeID] = "giveUp" end
