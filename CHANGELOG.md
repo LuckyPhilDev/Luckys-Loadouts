@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.5] - 2026-11-14
 
 ### Fixed
 - Clicking a spell in the spellbook no longer fails with a blocked action error after using the minimap button, talent picking or talent highlighting, which now ask you to open your Talents window first.
