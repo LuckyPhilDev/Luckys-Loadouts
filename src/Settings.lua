@@ -1,4 +1,4 @@
--- luacheck: globals LuckyLoadouts PlayerSpellsFrame PlayerSpellsUtil EventUtil C_Timer
+-- luacheck: globals LuckyLoadouts PlayerSpellsFrame EventUtil C_Timer
 
 LuckyLoadouts = LuckyLoadouts or {}
 LuckyLoadouts.Settings = {}
@@ -529,8 +529,7 @@ end
 local function pickTalents(mode, title, getList)
     local specID = LuckyLoadouts.Loadouts:GetCurrentSpec()
     if not specID then return end
-    assignDialog:Hide()
-    LuckyLoadouts.Talents.StartPick(mode, title,
+    local started = LuckyLoadouts.Talents.StartPick(mode, title,
         function() return getList(specID) end,
         function() LuckyLoadouts.Reminders:AssignmentChanged(specID) end,
         function()
@@ -539,6 +538,7 @@ local function pickTalents(mode, title, getList)
                 if manager:IsVisible() then showAssignments() end
             end)
         end)
+    if started then assignDialog:Hide() end
 end
 
 local function showTilePicker(tile)
@@ -1272,12 +1272,11 @@ function SettingsUI:OpenSettings()
     settingsPanel:Open()
 end
 
+-- Docked, the manager shows with the Talents window, which only the player may open.
 function SettingsUI:OpenManager()
-    if PlayerSpellsUtil and PlayerSpellsUtil.OpenToClassTalentsTab then
-        PlayerSpellsUtil.OpenToClassTalentsTab()
-    elseif not manager:IsShown() then
-        manager:Show()
-    end
+    local docked = PlayerSpellsFrame and manager:GetParent() == PlayerSpellsFrame
+    if docked and not LuckyLoadouts.Talents.RequireOpenTree() then return end
+    manager:Show()
     self:RefreshManager()
 end
 
